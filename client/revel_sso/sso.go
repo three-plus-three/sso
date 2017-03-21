@@ -1,22 +1,21 @@
 package revel_sso
 
 import (
-	"cn/com/hengwei/commons/sessions"
-	sso "cn/com/hengwei/sso/client"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/revel/revel"
+	sso "github.com/three-plus-three/sso/client"
 )
 
 type CheckFunc func(c *revel.Controller) revel.Result
 
 func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Request) string) CheckFunc {
 	return func(c *revel.Controller) revel.Result {
-		if sessions.SessionTimeoutExpiredOrMissing(c.Session[sessions.SESSION_EXPIRE_KEY]) ||
-			sessions.SessionInvalid(c.Session[sessions.SESSION_VALID_KEY]) {
+		if sso.SessionIsExpiredOrMissing(c.Session[sso.SESSION_EXPIRE_KEY]) ||
+			sso.SessionIsInvalid(c.Session[sso.SESSION_VALID_KEY]) {
 
 			var currentURL string
 			if getURL != nil {
@@ -38,9 +37,9 @@ func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Requ
 				return c.RenderError(errors.New("验证 ticket 失败，" + err.Error()))
 			}
 
-			c.Session[sessions.SESSION_VALID_KEY] = "true"
+			c.Session[sso.SESSION_VALID_KEY] = "true"
 			if user, ok := ticket.Claims["username"]; ok && user != nil {
-				c.Session[sessions.SESSION_USER_KEY] = fmt.Sprint(user)
+				c.Session[sso.SESSION_USER_KEY] = fmt.Sprint(user)
 			}
 		}
 

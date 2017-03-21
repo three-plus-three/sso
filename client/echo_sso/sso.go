@@ -1,11 +1,10 @@
-package echo_middleware
+package echo_sso
 
 import (
 	"errors"
 
-	"cn/com/hengwei/sso/client"
-
 	"github.com/labstack/echo"
+	"github.com/three-plus-three/sso/client"
 )
 
 type (

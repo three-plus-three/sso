@@ -1,10 +1,10 @@
 package main
 
 import (
-	"cn/com/hengwei/sso/server"
 	"flag"
 
 	_ "github.com/lib/pq"
+	"github.com/three-plus-three/sso/server"
 )
 
 func main() {

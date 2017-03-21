@@ -2,8 +2,6 @@ package server
 
 import (
 	"bytes"
-	"cn/com/hengwei/sso/client"
-	echo_middleware "cn/com/hengwei/sso/client/echo"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -15,12 +13,13 @@ import (
 	"net/url"
 	"testing"
 
-	"golang.org/x/net/publicsuffix"
-
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	_ "github.com/lib/pq"
+	"github.com/three-plus-three/sso/client"
+	"github.com/three-plus-three/sso/client/echo_sso"
+	"golang.org/x/net/publicsuffix"
 )
 
 var dbType = flag.String("db.type", "postgres", "")
@@ -261,7 +260,7 @@ func TestLoginWithRedirect(t *testing.T) {
 	e := echo.New()
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(echo_middleware.SSOWithConfig("query", "ticket", "", srv.client))
+	e.Use(echo_sso.SSOWithConfig("query", "ticket", "", srv.client))
 	e.GET("welcome", func(c echo.Context) error {
 		return c.String(http.StatusOK, text)
 	})
