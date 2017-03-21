@@ -65,10 +65,11 @@ func SSOHandlers(ssoClient *sso.Client, sessionKey, sessionPath string, h func()
 		sessionPath = "/" + sessionPath
 	}
 
-	// var sKey []byte
-	// if secretKey != "" {
-	// 	sKey = []byte(secretKey)
-	// }
+	if currentURL == nil {
+		currentURL = func(req *http.Request) url.URL {
+			return *req.URL
+		}
+	}
 
 	restricted := func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -83,7 +84,7 @@ func SSOHandlers(ssoClient *sso.Client, sessionKey, sessionPath string, h func()
 				return echo.ErrUnauthorized
 			}
 
-			if !sso.IsInvalid(sess) {
+			if sso.IsInvalid(sess) {
 				log.Println("session is invalid")
 				return echo.ErrUnauthorized
 			}

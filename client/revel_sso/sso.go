@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/revel/revel"
@@ -12,14 +13,15 @@ import (
 
 type CheckFunc func(c *revel.Controller) revel.Result
 
-func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Request) string) CheckFunc {
+func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Request) url.URL) CheckFunc {
 	return func(c *revel.Controller) revel.Result {
 		if sso.SessionIsExpiredOrMissing(c.Session[sso.SESSION_EXPIRE_KEY]) ||
 			sso.SessionIsInvalid(c.Session[sso.SESSION_VALID_KEY]) {
 
 			var currentURL string
 			if getURL != nil {
-				currentURL = getURL(c.Request.Request)
+				u := getURL(c.Request.Request)
+				currentURL = u.String()
 			} else {
 				currentURL = c.Request.Request.URL.String()
 			}
