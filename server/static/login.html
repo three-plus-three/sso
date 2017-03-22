@@ -3411,6 +3411,7 @@
                 </div>
                 <form id="loginform" name="loginform" method="post" action="login">
                     <input type="hidden" name="service" value="{{.service}}" />
+                    <input type="hidden" name="login_fail_count" value="{{.login_fail_count}}" />
                     <div class="form-group">
                         <input type="text" name="username" class="form-control" placeholder="用户名" value="{{.username}}" autofocus>
                     </div>

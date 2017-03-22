@@ -10,7 +10,7 @@ import (
 func main() {
 	dbConfig := &server.DbConfig{}
 	config := &server.Config{
-		AuthConfig: dbConfig,
+		UserConfig: dbConfig,
 		//UrlPrefix: "hw",
 		HeaderTitleText: "单点登录系统 v1.0",
 		FooterTitleText: "© 2017 恒维信息技术(上海)有限公司, 保留所有版权。",

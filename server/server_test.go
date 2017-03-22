@@ -42,7 +42,7 @@ func (srv *serverTest) Close() error {
 
 func MakeTestConfig() *Config {
 	config := &Config{
-		AuthConfig: &DbConfig{
+		UserConfig: &DbConfig{
 			DbType:   *dbType,
 			Address:  *dbHost,
 			Port:     *dbPort,
@@ -65,7 +65,7 @@ var (
 )
 
 func startTest(t *testing.T, table string, config *Config) *serverTest {
-	dbDrv, dbURL := config.AuthConfig.(*DbConfig).URL()
+	dbDrv, dbURL := config.UserConfig.(*DbConfig).URL()
 	db, err := sql.Open(dbDrv, dbURL)
 	if err != nil {
 		t.Error(err)
@@ -182,7 +182,7 @@ func TestLoginWithDefault(t *testing.T) {
 
 func TestLoginWithMD5Hash(t *testing.T) {
 	config := MakeTestConfig()
-	config.AuthConfig.(*DbConfig).Params = signTestParams
+	config.AuthConfig = signTestParams
 
 	srv := startTest(t, "", config)
 	defer srv.Close()
@@ -207,8 +207,7 @@ func TestLoginWithMD5Hash(t *testing.T) {
 
 func TestLoginWithMD5HashAndPasswordError(t *testing.T) {
 	config := MakeTestConfig()
-
-	config.AuthConfig.(*DbConfig).Params = signTestParams
+	config.AuthConfig = signTestParams
 
 	srv := startTest(t, "", config)
 	defer srv.Close()
@@ -226,10 +225,8 @@ func TestLoginWithMD5HashAndPasswordError(t *testing.T) {
 
 func TestLoginWithQuerySQL(t *testing.T) {
 	config := MakeTestConfig()
-	config.AuthConfig.(*DbConfig).Params = map[string]interface{}{"querySQL": "SELECT * FROM hengwei_users WHERE username = ?"}
-	for k, v := range signTestParams {
-		config.AuthConfig.(*DbConfig).Params[k] = v
-	}
+	config.UserConfig.(*DbConfig).Params = map[string]interface{}{"querySQL": "SELECT * FROM hengwei_users WHERE username = ?"}
+	config.AuthConfig = signTestParams
 
 	srv := startTest(t, "hengwei_users", config)
 	defer srv.Close()

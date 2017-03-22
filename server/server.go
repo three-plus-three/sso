@@ -36,6 +36,9 @@ var (
 	// ErrMutiUsers 找到多个用户
 	ErrMutiUsers = errors.New("muti users is found")
 
+	// ErrUserLocked 用户已被锁定
+	ErrUserLocked = errors.New("user is locked")
+
 	// ErrServiceTicketNotFound Service ticket 没有找到
 	ErrServiceTicketNotFound = echo.NewHTTPError(http.StatusUnauthorized, "service ticket isn't found")
 
@@ -45,37 +48,6 @@ var (
 	// ErrUnauthorizedService Service 是未授权的
 	ErrUnauthorizedService = echo.NewHTTPError(http.StatusUnauthorized, "service is unauthorized")
 )
-
-// AuthenticationHandler 验证用户并返回用户信息
-type AuthenticationHandler interface {
-	Auth(username, password string) (bool, map[string]interface{}, error)
-}
-
-// UserHandler 读用户配置的 Handler
-type UserHandler interface {
-	ReadUser(username string) ([]map[string]interface{}, error)
-}
-
-var DefaultAuthenticationHandler func(config interface{}) (AuthenticationHandler, error)
-
-// Ticket 票据对象
-type Ticket struct {
-	Ticket    string
-	Username  string
-	SessionID string
-	ExpiresAt time.Time
-	IssuedAt  time.Time
-	Data      map[string]interface{}
-}
-
-// TicketHandler 票据的管理
-type TicketHandler interface {
-	NewTicket(username string, data map[string]interface{}) (*Ticket, error)
-	ValidateTicket(ticket string, renew bool) (*Ticket, error)
-	RemoveTicket(ticket string) error
-}
-
-var TicketHandlerFactories = map[string]func(map[string]interface{}) (TicketHandler, error){}
 
 // TicketGetter 从请求中获取票据
 type TicketGetter func(c echo.Context) string
@@ -92,11 +64,13 @@ type Config struct {
 	CookieSecure   bool
 	CookieHttpOnly bool
 
-	WelcomeURL       string
-	RedirectMode     string
-	CookiesForLogout []*http.Cookie
+	MaxLoginFailCount int
+	WelcomeURL        string
+	RedirectMode      string
+	CookiesForLogout  []*http.Cookie
 
 	ListenAt       string
+	UserConfig     interface{}
 	AuthConfig     interface{}
 	TicketLookup   string
 	TicketProtocol string
@@ -143,6 +117,9 @@ func CreateServer(config *Config) (*Server, error) {
 	} else if !strings.HasPrefix(config.CookiePath, "/") {
 		config.CookiePath = "/" + config.CookiePath
 	}
+	if config.MaxLoginFailCount <= 0 {
+		config.MaxLoginFailCount = 3
+	}
 
 	templateBox, err := rice.FindBox("static")
 	if err != nil {
@@ -170,10 +147,19 @@ func CreateServer(config *Config) (*Server, error) {
 		}
 	}
 
-	if DefaultAuthenticationHandler == nil {
-		DefaultAuthenticationHandler = createDbAuthenticationHandler
+	if DefaultUserHandler == nil {
+		DefaultUserHandler = createDbUserHandler
 	}
-	authenticationHandler, err := DefaultAuthenticationHandler(config.AuthConfig)
+	if DefaultAuthenticationHandler == nil {
+		DefaultAuthenticationHandler = CreateUserAuthenticationHandler
+	}
+
+	userHandler, err := DefaultUserHandler(config.UserConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	authenticationHandler, err := DefaultAuthenticationHandler(userHandler, config.AuthConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -207,21 +193,24 @@ func CreateServer(config *Config) (*Server, error) {
 			return c.QueryParam("_method")
 		}}))
 	srv := &Server{
-		engine:         e,
-		cookieDomain:   config.CookieDomain,
-		cookiePath:     config.CookiePath,
-		cookieSecure:   config.CookieSecure,
-		cookieHttpOnly: config.CookieHttpOnly,
-		urlPrefix:      config.UrlPrefix,
-		welcomeURL:     config.WelcomeURL,
-		auth:           authenticationHandler,
-		tokenName:      tokenName,
-		ticketGetter:   ticketGetter,
-		tickets:        ticketHandler,
+		engine:            e,
+		cookieDomain:      config.CookieDomain,
+		cookiePath:        config.CookiePath,
+		cookieSecure:      config.CookieSecure,
+		cookieHttpOnly:    config.CookieHttpOnly,
+		urlPrefix:         config.UrlPrefix,
+		welcomeURL:        config.WelcomeURL,
+		userHandler:       userHandler,
+		auth:              authenticationHandler,
+		tokenName:         tokenName,
+		maxLoginFailCount: config.MaxLoginFailCount,
+		ticketGetter:      ticketGetter,
+		tickets:           ticketHandler,
 		authenticatingTickets: authenticatingTickets{
 			timeout: 1 * time.Minute,
 			tickets: map[string]*authenticatingTicket{},
 		},
+		userLocks: CreateUserLocks(),
 		redirect: func(c echo.Context, toURL string) error {
 			return c.Redirect(http.StatusTemporaryRedirect, toURL)
 		},
@@ -287,13 +276,17 @@ type Server struct {
 	urlPrefix             string
 	welcomeURL            string
 	tokenName             string
+	maxLoginFailCount     int
+	userHandler           UserHandler
 	auth                  AuthenticationHandler
 	tickets               TicketHandler
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
+	userLocks             UserLocks
 	redirect              func(c echo.Context, url string) error
 	data                  map[string]interface{}
-	cookiesForLogout      []*http.Cookie
+
+	cookiesForLogout []*http.Cookie
 }
 
 type renderer struct {
@@ -385,9 +378,10 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type userLogin struct {
-	Username string `json:"username" xml:"username" form:"username" query:"username"`
-	Password string `json:"password" xml:"password" form:"password" query:"password"`
-	Service  string `json:"service" xml:"service" form:"service" query:"service"`
+	Username       string `json:"username" xml:"username" form:"username" query:"username"`
+	Password       string `json:"password" xml:"password" form:"password" query:"password"`
+	Service        string `json:"service" xml:"service" form:"service" query:"service"`
+	LoginFailCount int    `json:"login_fail_count" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
 }
 
 func (srv *Server) loginGet(c echo.Context) error {
@@ -418,11 +412,16 @@ func (srv *Server) loginGet(c echo.Context) error {
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
-func (srv *Server) relogin(c echo.Context, user userLogin) error {
+func (srv *Server) relogin(c echo.Context, user userLogin, message string) error {
+	if message == "" {
+		message = "用户名或密码不正确!"
+	}
+
 	data := map[string]interface{}{"global": srv.data,
-		"service":      user.Service,
-		"username":     user.Username,
-		"errorMessage": "用户名或密码不正确!",
+		"service":          user.Service,
+		"login_fail_count": user.LoginFailCount,
+		"username":         user.Username,
+		"errorMessage":     message,
 	}
 	return c.Render(http.StatusOK, "login.html", data)
 }
@@ -438,25 +437,52 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
+	var failCount = srv.userLocks.Count(user.Username)
+	if failCount > srv.maxLoginFailCount {
+		if err := srv.userHandler.LockUser(user.Username); err != nil {
+			log.Println("lock", user.Username, "fail,", err)
+		}
+		user.LoginFailCount = failCount
+		if !isConsumeJSON(c) {
+			return srv.relogin(c, user, "错误次数大多，帐号被锁定！")
+		}
+
+		return ErrUserLocked
+	}
+
 	authOK, userData, err := srv.auth.Auth(user.Username, user.Password)
 	if err != nil {
 		log.Println("用户授权失败 -", err)
 
-		if !isConsumeJSON(c) {
-			return srv.relogin(c, user)
+		if err == ErrPasswordNotMatch {
+			srv.userLocks.FailOne(user.Username)
+
+			var failCount = srv.userLocks.Count(user.Username)
+			if failCount > srv.maxLoginFailCount {
+				if err := srv.userHandler.LockUser(user.Username); err != nil {
+					log.Println("lock", user.Username, "fail,", err)
+				}
+			}
 		}
 
+		if !isConsumeJSON(c) {
+			return srv.relogin(c, user, "")
+		}
+
+		if err == ErrPasswordNotMatch {
+			return err
+		}
 		if err == ErrUserNotFound {
 			return err
 		}
-		if err == ErrPasswordNotMatch {
+		if err == ErrUserLocked {
 			return err
 		}
 		return echo.ErrUnauthorized
 	}
 	if !authOK {
 		if !isConsumeJSON(c) {
-			return srv.relogin(c, user)
+			return srv.relogin(c, user, "")
 		}
 
 		return ErrPasswordNotMatch
@@ -466,7 +492,7 @@ func (srv *Server) login(c echo.Context) error {
 		log.Println("内部生成 ticket 失败 -", err)
 
 		if !isConsumeJSON(c) {
-			return srv.relogin(c, user)
+			return srv.relogin(c, user, "")
 		}
 		return echo.ErrUnauthorized
 	}

@@ -11,6 +11,26 @@ import (
 	"github.com/labstack/echo"
 )
 
+// Ticket 票据对象
+type Ticket struct {
+	Ticket    string
+	Username  string
+	SessionID string
+	ExpiresAt time.Time
+	IssuedAt  time.Time
+	Data      map[string]interface{}
+}
+
+// TicketHandler 票据的管理
+type TicketHandler interface {
+	NewTicket(username string, data map[string]interface{}) (*Ticket, error)
+	ValidateTicket(ticket string, renew bool) (*Ticket, error)
+	RemoveTicket(ticket string) error
+}
+
+// TicketHandlerFactories 工厂
+var TicketHandlerFactories = map[string]func(map[string]interface{}) (TicketHandler, error){}
+
 func init() {
 	TicketHandlerFactories["jwt"] = createJwtTicketHandler
 }
