@@ -36,7 +36,7 @@ type UserImpl struct {
 	password          string
 	lockedAt          time.Time
 	lockedTimeExpires time.Duration
-	blockIPList       []IPChecker
+	ingressIPList     []IPChecker
 	data              map[string]interface{}
 }
 
@@ -66,7 +66,7 @@ func RealIP(req *http.Request) string {
 }
 
 func (u *UserImpl) CanUse(req *http.Request) (bool, error) {
-	if len(u.blockIPList) != 0 {
+	if len(u.ingressIPList) != 0 {
 		currentAddr := RealIP(req)
 		ip := net.ParseIP(currentAddr)
 		if ip == nil {
@@ -74,7 +74,7 @@ func (u *UserImpl) CanUse(req *http.Request) (bool, error) {
 		}
 
 		blocked := true
-		for _, checker := range u.blockIPList {
+		for _, checker := range u.ingressIPList {
 			if checker.Contains(ip) {
 				blocked = false
 				break
@@ -147,7 +147,7 @@ type dbUserHandler struct {
 	querySQL          string
 	lockSQL           string
 	passwordName      string
-	blockIPList       string
+	ingressIPList     string
 	lockedFieldName   string
 	lockedTimeExpires time.Duration
 	lockedTimeLayout  string
@@ -172,7 +172,7 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 
 	lockedTimeExpires := time.Duration(0)
 	lockedTimeLayout := ""
-	blockIPList := ""
+	ingressIPList := ""
 
 	if config.Params != nil {
 		if o, ok := config.Params["password"]; ok && o != nil {
@@ -185,13 +185,13 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 			}
 		}
 
-		if o, ok := config.Params["block_list"]; ok && o != nil {
+		if o, ok := config.Params["ingress_ip_list"]; ok && o != nil {
 			s, ok := o.(string)
 			if !ok {
-				return nil, errors.New("数据库配置中的 blockIPList 的值不是字符串")
+				return nil, errors.New("数据库配置中的 ingress_list 的值不是字符串")
 			}
 			if s = strings.TrimSpace(s); s != "" {
-				blockIPList = s
+				ingressIPList = s
 			}
 		}
 
@@ -259,7 +259,7 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 		db:                db,
 		querySQL:          querySQL,
 		lockSQL:           lockSQL,
-		blockIPList:       blockIPList,
+		ingressIPList:     ingressIPList,
 		passwordName:      passwordName,
 		lockedFieldName:   lockedFieldName,
 		lockedTimeExpires: lockedTimeExpires,
@@ -301,15 +301,15 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 		}
 	}
 
-	var blockIPList []IPChecker
-	if o := data[ah.blockIPList]; o != nil {
+	var ingressIPList []IPChecker
+	if o := data[ah.ingressIPList]; o != nil {
 		s, ok := o.(string)
 		if !ok {
-			return nil, fmt.Errorf("value of '"+ah.blockIPList+"' isn't string - %T: %s", o, o)
+			return nil, fmt.Errorf("value of '"+ah.ingressIPList+"' isn't string - %T: %s", o, o)
 		}
 		var ipList []string
 		if err := json.Unmarshal([]byte(s), &ipList); err != nil {
-			return nil, fmt.Errorf("value of '"+ah.blockIPList+"' isn't []string - %s", o)
+			return nil, fmt.Errorf("value of '"+ah.ingressIPList+"' isn't []string - %s", o)
 		}
 
 		for _, s := range ipList {
@@ -320,30 +320,30 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 			if strings.Contains(s, "-") {
 				ss := strings.Split(s, "-")
 				if len(ss) != 2 {
-					return nil, fmt.Errorf("value of '"+ah.blockIPList+"' isn't invalid ip range - %s", s)
+					return nil, fmt.Errorf("value of '"+ah.ingressIPList+"' isn't invalid ip range - %s", s)
 				}
 				checker, err := IPRangeWith(ss[0], ss[1])
 				if err != nil {
-					return nil, fmt.Errorf("value of '"+ah.blockIPList+"' isn't invalid ip range - %s", s)
+					return nil, fmt.Errorf("value of '"+ah.ingressIPList+"' isn't invalid ip range - %s", s)
 				}
-				blockIPList = append(blockIPList, checker)
+				ingressIPList = append(ingressIPList, checker)
 				continue
 			}
 
 			if strings.Contains(s, "/") {
 				_, cidr, err := net.ParseCIDR(s)
 				if err != nil {
-					return nil, fmt.Errorf("value of '"+ah.blockIPList+"' isn't invalid ip range - %s", s)
+					return nil, fmt.Errorf("value of '"+ah.ingressIPList+"' isn't invalid ip range - %s", s)
 				}
-				blockIPList = append(blockIPList, cidr)
+				ingressIPList = append(ingressIPList, cidr)
 				continue
 			}
 
 			checker, err := IPRangeWith(s, s)
 			if err != nil {
-				return nil, fmt.Errorf("value of '"+ah.blockIPList+"' isn't invalid ip range - %s", s)
+				return nil, fmt.Errorf("value of '"+ah.ingressIPList+"' isn't invalid ip range - %s", s)
 			}
-			blockIPList = append(blockIPList, checker)
+			ingressIPList = append(ingressIPList, checker)
 		}
 	}
 
@@ -352,7 +352,7 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 		password:          password,
 		lockedAt:          lockedAt,
 		lockedTimeExpires: ah.lockedTimeExpires,
-		blockIPList:       blockIPList,
+		ingressIPList:     ingressIPList,
 		data:              data,
 	}, nil
 }
