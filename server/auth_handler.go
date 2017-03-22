@@ -307,6 +307,7 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 
 	if config.DbType == "postgres" || config.DbType == "postgresql" {
 		querySQL = replacePlaceholders(querySQL)
+		lockSQL = replacePlaceholders(lockSQL)
 	}
 
 	return &dbHandler{
