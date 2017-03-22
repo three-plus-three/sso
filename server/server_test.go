@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	jwt "github.com/dgrijalva/jwt-go"
@@ -57,6 +58,7 @@ func MakeTestConfig() *Config {
 }
 
 var (
+	zhu_pwd    = "aaa"
 	testMethod = jwt.SigningMethodHS256
 	testKey    = []byte("asdfagsfe")
 
@@ -94,7 +96,7 @@ func startTest(t *testing.T, table string, config *Config) *serverTest {
 );
 
 insert into ` + table + `(username, password, email, location) values('mei', 'aat', 'mei@a.com', 'an hui');
-insert into ` + table + `(username, password, email, location) values('zhu', '` + makeMD5("aaa") + `', 'zhu@a.com', 'shanghai');
+insert into ` + table + `(username, password, email, location) values('zhu', '` + makeMD5(zhu_pwd) + `', 'zhu@a.com', 'shanghai');
 `)
 
 	if err != nil {
@@ -187,7 +189,7 @@ func TestLoginWithMD5Hash(t *testing.T) {
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	ticket, err := srv.client.NewTicket("zhu", "aaa")
+	ticket, err := srv.client.NewTicket("zhu", zhu_pwd)
 	if err != nil {
 		t.Error(err)
 		return
@@ -223,6 +225,39 @@ func TestLoginWithMD5HashAndPasswordError(t *testing.T) {
 	}
 }
 
+func TestLoginFailAndLocked(t *testing.T) {
+	config := MakeTestConfig()
+	config.AuthConfig = signTestParams
+
+	srv := startTest(t, "", config)
+	defer srv.Close()
+
+	for i := 0; i < 50; i++ {
+		_, err := srv.client.NewTicket("zhu", "aaaa")
+		if err == nil {
+			t.Error("except error, but success")
+			return
+		}
+
+		if err != client.ErrPasswordNotMatch {
+			if strings.Contains(err.Error(), fmt.Sprint(ErrUserLocked.Message)) {
+				break
+			}
+			t.Error("except error code is ErrPasswordNotMatch, actual is", err)
+		}
+	}
+
+	_, err := srv.client.NewTicket("zhu", zhu_pwd)
+	if err == nil {
+		t.Error("except error, but success")
+		return
+	}
+
+	if !strings.Contains(err.Error(), fmt.Sprint(ErrUserLocked.Message)) {
+		t.Error("except error code is ErrPasswordNotMatch, actual is", err)
+	}
+}
+
 func TestLoginWithQuerySQL(t *testing.T) {
 	config := MakeTestConfig()
 	config.UserConfig.(*DbConfig).Params = map[string]interface{}{"querySQL": "SELECT * FROM hengwei_users WHERE username = ?"}
@@ -231,7 +266,7 @@ func TestLoginWithQuerySQL(t *testing.T) {
 	srv := startTest(t, "hengwei_users", config)
 	defer srv.Close()
 
-	ticket, err := srv.client.NewTicket("zhu", "aaa")
+	ticket, err := srv.client.NewTicket("zhu", zhu_pwd)
 	if err != nil {
 		t.Error(err)
 		return
