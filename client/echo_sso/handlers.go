@@ -114,6 +114,9 @@ func SSOHandlers(ssoClient *sso.Client, sessionKey, sessionPath string, h func()
 		values.Set(sso.SESSION_ID_KEY, ticket.SessionID)
 		values.Set(sso.SESSION_EXPIRE_KEY, "session")
 		values.Set(sso.SESSION_VALID_KEY, "true")
+		if user, ok := ticket.Claims["username"]; ok {
+			values.Set(sso.SESSION_USER_KEY, fmt.Sprint(user))
+		}
 		c.SetCookie(&http.Cookie{Name: sessionKey,
 			Value: sso.Encode(values, h, secretKey),
 			Path:  sessionPath})
