@@ -269,6 +269,10 @@ func CreateServer(config *Config) (*Server, error) {
 	//srv.engine.GET("/auth", srv.getTicket)
 	srv.engine.GET(config.UrlPrefix+"/verify", srv.verifyTicket)
 	//srv.engine.POST("/verify", srv.verifyTickets)
+
+	srv.engine.GET(config.UrlPrefix+"/locked_users", srv.lockedUsers)
+	srv.engine.GET(config.UrlPrefix+"/unlock_user", srv.userUnlock)
+
 	return srv, nil
 }
 
@@ -311,6 +315,10 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 	return t.Execute(wr, data)
 }
 
+var funcs = template.FuncMap{
+	"query": url.QueryEscape,
+}
+
 func (r *renderer) loadTemplate(name string) (*template.Template, error) {
 	r.templatesLock.Lock()
 	t := r.templates[name]
@@ -323,7 +331,7 @@ func (r *renderer) loadTemplate(name string) (*template.Template, error) {
 		filename := filepath.Join(pa, name)
 		bs, err := ioutil.ReadFile(filename)
 		if err == nil {
-			t, err = template.New(name).Parse(string(bs))
+			t, err = template.New(name).Funcs(funcs).Parse(string(bs))
 			if err != nil {
 				log.Println("failed to load template(", name, ") from ", filename, ", ", err)
 				return nil, err
@@ -349,7 +357,7 @@ func (r *renderer) loadTemplate(name string) (*template.Template, error) {
 			return nil, err
 		}
 
-		t, err = template.New(name).Parse(string(bs))
+		t, err = template.New(name).Funcs(funcs).Parse(string(bs))
 		if err != nil {
 			log.Println("failed to load template(", name, ") from rice box, ", err)
 			return nil, err
@@ -388,6 +396,33 @@ type userLogin struct {
 	Password       string `json:"password" xml:"password" form:"password" query:"password"`
 	Service        string `json:"service" xml:"service" form:"service" query:"service"`
 	LoginFailCount int    `json:"login_fail_count" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
+}
+
+func (srv *Server) lockedUsers(c echo.Context) error {
+	return srv.lockedUsersWithError(c, nil)
+}
+
+func (srv *Server) lockedUsersWithError(c echo.Context, unlocked error) error {
+	users, err := srv.userHandler.LockedUsers()
+	data := map[string]interface{}{"global": srv.data,
+		"users": users}
+	if err != nil {
+		data["error"] = err.Error()
+	}
+	if unlocked != nil {
+		data["error"] = unlocked.Error()
+	}
+
+	return c.Render(http.StatusOK, "locked_users.html", data)
+}
+
+func (srv *Server) userUnlock(c echo.Context) error {
+	username := c.QueryParam("username")
+	err := srv.userHandler.UnlockUser(username)
+	if err == nil {
+		srv.userLocks.Zero(username)
+	}
+	return srv.lockedUsersWithError(c, err)
 }
 
 func (srv *Server) loginGet(c echo.Context) error {

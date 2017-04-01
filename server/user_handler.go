@@ -136,16 +136,26 @@ func IPRangeWith(start, end string) (IPChecker, error) {
 	return IPRange(s, e)
 }
 
+type LockedUser struct {
+	Name     string
+	LockedAt time.Time
+}
+
 // UserHandler 读用户配置的 Handler
 type UserHandler interface {
 	ReadUser(username string) ([]User, error)
 	LockUser(username string) error
+	UnlockUser(username string) error
+	LockedUsers() ([]LockedUser, error)
 }
 
 type dbUserHandler struct {
 	db                *sql.DB
 	querySQL          string
 	lockSQL           string
+	unlockSQL         string
+	lockedSQL         string
+	userFieldName     string
 	passwordName      string
 	ingressIPList     string
 	lockedFieldName   string
@@ -166,7 +176,10 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 
 	lockSQL := ""
 	querySQL := "SELECT * FROM users WHERE username = ?"
+	unlockSQL := ""
+	lockedSQL := ""
 
+	userFieldName := "username"
 	passwordName := "password"
 	lockedFieldName := ""
 
@@ -175,6 +188,16 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 	ingressIPList := ""
 
 	if config.Params != nil {
+		if o, ok := config.Params["username"]; ok && o != nil {
+			s, ok := o.(string)
+			if !ok {
+				return nil, errors.New("数据库配置中的 username 的值不是字符串")
+			}
+			if s = strings.TrimSpace(s); s != "" {
+				userFieldName = s
+			}
+		}
+
 		if o, ok := config.Params["password"]; ok && o != nil {
 			s, ok := o.(string)
 			if !ok {
@@ -248,23 +271,79 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 				lockSQL = s
 			}
 		}
+
+		if o, ok := config.Params["unlockSQL"]; ok && o != nil {
+			s, ok := o.(string)
+			if !ok {
+				return nil, errors.New("数据库配置中的 unlockSQL 的值不是字符串")
+			}
+			if strings.TrimSpace(s) != "" {
+				unlockSQL = s
+			}
+		}
+
+		if o, ok := config.Params["lockedSQL"]; ok && o != nil {
+			s, ok := o.(string)
+			if !ok {
+				return nil, errors.New("数据库配置中的 lockedSQL 的值不是字符串")
+			}
+			if strings.TrimSpace(s) != "" {
+				lockedSQL = s
+			}
+		}
 	}
 
 	if config.DbType == "postgres" || config.DbType == "postgresql" {
 		querySQL = ReplacePlaceholders(querySQL)
 		lockSQL = ReplacePlaceholders(lockSQL)
+		unlockSQL = ReplacePlaceholders(unlockSQL)
+		lockedSQL = ReplacePlaceholders(lockedSQL)
 	}
 
 	return &dbUserHandler{
 		db:                db,
 		querySQL:          querySQL,
 		lockSQL:           lockSQL,
+		unlockSQL:         unlockSQL,
+		lockedSQL:         lockedSQL,
 		ingressIPList:     ingressIPList,
+		userFieldName:     userFieldName,
 		passwordName:      passwordName,
 		lockedFieldName:   lockedFieldName,
 		lockedTimeExpires: lockedTimeExpires,
 		lockedTimeLayout:  lockedTimeLayout,
 	}, nil
+}
+
+func (ah *dbUserHandler) toLockedUser(data map[string]interface{}) LockedUser {
+	username := fmt.Sprint(data[ah.userFieldName])
+	lockedAt, _ := ah.parseTime(data[ah.lockedFieldName])
+
+	return LockedUser{Name: username, LockedAt: lockedAt}
+}
+
+func (ah *dbUserHandler) parseTime(o interface{}) (time.Time, error) {
+	switch v := o.(type) {
+	case []byte:
+		if len(v) != 0 {
+			lockedAt := parseTime(ah.lockedTimeLayout, string(v))
+			if lockedAt.IsZero() {
+				return time.Time{}, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %s", string(v))
+			}
+			return lockedAt, nil
+		}
+	case string:
+		if v != "" {
+			lockedAt := parseTime(ah.lockedTimeLayout, v)
+			if lockedAt.IsZero() {
+				return time.Time{}, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %s", o)
+			}
+			return lockedAt, nil
+		}
+	case time.Time:
+		return v, nil
+	}
+	return time.Time{}, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %T:%v", o, o)
 }
 
 func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User, error) {
@@ -279,25 +358,10 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 
 	var lockedAt time.Time
 	if o := data[ah.lockedFieldName]; o != nil {
-		switch v := o.(type) {
-		case []byte:
-			if len(v) != 0 {
-				lockedAt = parseTime(ah.lockedTimeLayout, string(v))
-				if lockedAt.IsZero() {
-					return nil, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %s", string(v))
-				}
-			}
-		case string:
-			if v != "" {
-				lockedAt = parseTime(ah.lockedTimeLayout, v)
-				if lockedAt.IsZero() {
-					return nil, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %s", o)
-				}
-			}
-		case time.Time:
-			lockedAt = v
-		default:
-			return nil, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %T:%v", o, o)
+		var err error
+		lockedAt, err = ah.parseTime(o)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -404,12 +468,75 @@ func (ah *dbUserHandler) ReadUser(username string) ([]User, error) {
 	return users, nil
 }
 
+func (ah *dbUserHandler) LockedUsers() ([]LockedUser, error) {
+	rows, err := ah.db.Query(ah.lockedSQL)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var users []LockedUser
+	for rows.Next() {
+		columns, err := rows.Columns()
+		if err != nil {
+			return nil, err
+		}
+		var values = make([]interface{}, len(columns))
+		var valueRefs = make([]interface{}, len(columns))
+		for idx := range values {
+			valueRefs[idx] = &values[idx]
+		}
+		err = rows.Scan(valueRefs...)
+		if nil != err {
+			return nil, err
+		}
+
+		user := map[string]interface{}{}
+		for idx, nm := range columns {
+			value := values[idx]
+			if bs, ok := value.([]byte); ok && bs != nil {
+				value = string(bs)
+			}
+			user[nm] = value
+		}
+
+		users = append(users, ah.toLockedUser(user))
+	}
+	if rows.Err() != nil {
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+	}
+	return users, nil
+}
+
 func (ah *dbUserHandler) LockUser(username string) error {
 	if ah.lockSQL == "" {
 		return nil
 	}
 
 	res, err := ah.db.Exec(ah.lockSQL, time.Now(), username)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New("0 updated")
+	}
+	return nil
+}
+
+func (ah *dbUserHandler) UnlockUser(username string) error {
+	if ah.unlockSQL == "" {
+		return nil
+	}
+
+	res, err := ah.db.Exec(ah.unlockSQL, username)
 	if err != nil {
 		return err
 	}

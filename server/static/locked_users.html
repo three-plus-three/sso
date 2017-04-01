@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>{{.global.header_title_text}}</title>
+
+    <link href="{{.global.url_prefix}}/static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{.global.url_prefix}}/static/font-awesome/css/font-awesome.css" rel="stylesheet">
+
+    <link href="{{.global.url_prefix}}/static/css/animate.css" rel="stylesheet">
+    <link href="{{.global.url_prefix}}/static/css/style.css" rel="stylesheet">
+
+</head>
+
+<body class="gray-bg">
+
+<div id="wrapper">
+        <div class="wrapper wrapper-content animated fadeInRight">
+            <div class="row">
+                <div class="col-xs-12">
+                    <div class="text-center m-t-lg">
+                        <h1>
+                            被锁用户列表
+                        </h1>
+                        <small>
+                            
+                        </small>
+                    </div>
+                </div>
+
+                {{if .error}}<div class="col-xs-8 col-xs-offset-2 alert alert-danger alert-dismissable">
+                <button aria-hidden="true" data-dismiss="alert" class="close" type="button">×</button>
+                    {{.error}}
+                </div>{{end}}
+
+                <div class="col-xs-8 col-xs-offset-2">
+                        <table class="table table-striped">
+                            <thead>
+                            <tr>
+                                <th>用户名</th>
+                                <th>锁定时间</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {{range $idx, $user := .users}}
+                            <tr>
+                                <td>{{$user.Name}}</td>
+                                <td>{{$user.LockedAt.Format "2006-01-02 15:04"}}</td>
+                                <td><a href="unlock_user?username={{query $user.Name}}"><i class="fa fa-unlock"></i>解锁</a></td>
+                            </tr>
+                            {{end}}
+                            </tbody>
+                        </table>
+                </div>
+            </div>
+        </div>
+
+
+    </div>
+</div>
+</body>
+</html>
