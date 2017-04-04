@@ -308,11 +308,24 @@ type renderer struct {
 }
 
 func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Context) error {
-	t, err := r.loadTemplate(name)
-	if err != nil {
-		return err
+	var t *template.Template
+	var err error
+	if name == "login.html" {
+		theme := c.QueryParam("theme")
+		t, err = r.loadTemplate("login_" + theme + ".html")
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
-	return t.Execute(wr, data)
+	if t == nil {
+		t, err = r.loadTemplate(name)
+		if err != nil {
+			return err
+		}
+	}
+	err = t.Execute(wr, data)
+	fmt.Println(err)
+	return err
 }
 
 var funcs = template.FuncMap{
@@ -399,6 +412,16 @@ type userLogin struct {
 }
 
 func (srv *Server) lockedUsers(c echo.Context) error {
+	ticketString := srv.ticketGetter(c)
+	if ticketString == "" {
+		return c.String(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	_, err := srv.tickets.ValidateTicket(ticketString, true)
+	if err != nil {
+		return c.String(http.StatusUnauthorized, err.Error())
+	}
+
 	return srv.lockedUsersWithError(c, nil)
 }
 
@@ -417,8 +440,18 @@ func (srv *Server) lockedUsersWithError(c echo.Context, unlocked error) error {
 }
 
 func (srv *Server) userUnlock(c echo.Context) error {
+	ticketString := srv.ticketGetter(c)
+	if ticketString == "" {
+		return c.String(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	_, err := srv.tickets.ValidateTicket(ticketString, true)
+	if err != nil {
+		return c.String(http.StatusUnauthorized, err.Error())
+	}
+
 	username := c.QueryParam("username")
-	err := srv.userHandler.UnlockUser(username)
+	err = srv.userHandler.UnlockUser(username)
 	if err == nil {
 		srv.userLocks.Zero(username)
 	}
