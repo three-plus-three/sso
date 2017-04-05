@@ -25,7 +25,7 @@ type Ticket struct {
 type TicketHandler interface {
 	NewTicket(username string, data map[string]interface{}) (*Ticket, error)
 	ValidateTicket(ticket string, renew bool) (*Ticket, error)
-	RemoveTicket(ticket string) error
+	RemoveTicket(ticket string) (*Ticket, error)
 }
 
 // TicketHandlerFactories 工厂
@@ -209,7 +209,7 @@ func (jh *jwtTicketHandler) ValidateTicket(ticketString string, renew bool) (*Ti
 	return ticket, nil
 }
 
-func (jh *jwtTicketHandler) RemoveTicket(ticketString string) error {
+func (jh *jwtTicketHandler) RemoveTicket(ticketString string) (*Ticket, error) {
 	// claims := &jwt.StandardClaims{}
 	// token, err := jwt.ParseWithClaims(ticketString, claims, jh.keyFunc)
 	// if err != nil {
@@ -219,11 +219,13 @@ func (jh *jwtTicketHandler) RemoveTicket(ticketString string) error {
 	// 	return nil
 	// }
 
+	var ticket *Ticket
 	jh.ticketMutex.Lock()
 	if jh.tickets != nil {
+		ticket = jh.tickets[ticketString]
 		delete(jh.tickets, ticketString)
 	}
 	jh.ticketMutex.Unlock()
 
-	return nil
+	return ticket, nil
 }

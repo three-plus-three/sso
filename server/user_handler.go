@@ -103,13 +103,21 @@ type ipRange struct {
 	start, end uint32
 }
 
+func (r *ipRange) String() string {
+	var a, b [4]byte
+	binary.BigEndian.PutUint32(a[:], r.start)
+	binary.BigEndian.PutUint32(b[:], r.end)
+	return net.IP(a[:]).String() + "-" +
+		net.IP(b[:]).String()
+}
+
 func (r *ipRange) Contains(ip net.IP) bool {
 	if ip.To4() == nil {
 		return false
 	}
 
 	v := binary.BigEndian.Uint32(ip.To4())
-	return r.start <= v || v <= r.end
+	return r.start <= v && v <= r.end
 }
 
 func IPRange(start, end net.IP) (IPChecker, error) {

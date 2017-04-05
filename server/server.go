@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -64,6 +65,7 @@ type Config struct {
 	FooterTitleText string
 	LogoPath        string
 	TampletePaths   []string
+	IsLockByAddress bool
 
 	CookieDomain   string
 	CookiePath     string
@@ -206,6 +208,7 @@ func CreateServer(config *Config) (*Server, error) {
 		cookieHttpOnly:    config.CookieHttpOnly,
 		urlPrefix:         config.UrlPrefix,
 		welcomeURL:        config.WelcomeURL,
+		IsLockByAddress:   config.IsLockByAddress,
 		userHandler:       userHandler,
 		auth:              authenticationHandler,
 		tokenName:         tokenName,
@@ -293,8 +296,13 @@ type Server struct {
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
 	userLocks             UserLocks
-	redirect              func(c echo.Context, url string) error
-	data                  map[string]interface{}
+
+	IsLockByAddress     bool
+	addressesByUserLock sync.Mutex
+	addressesByUser     map[string]string
+
+	redirect func(c echo.Context, url string) error
+	data     map[string]interface{}
 
 	cookiesForLogout []*http.Cookie
 }
@@ -323,9 +331,7 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 			return err
 		}
 	}
-	err = t.Execute(wr, data)
-	fmt.Println(err)
-	return err
+	return t.Execute(wr, data)
 }
 
 var funcs = template.FuncMap{
@@ -510,6 +516,14 @@ func (srv *Server) login(c echo.Context) error {
 		}
 		return echo.ErrUnauthorized
 	}
+	if srv.IsLockByAddress {
+		if locked := srv.isLockedByAddress(c, &user); locked {
+			if !isConsumeJSON(c) {
+				return srv.relogin(c, user, "用户已登录")
+			}
+			return echo.ErrUnauthorized
+		}
+	}
 
 	var failCount = srv.userLocks.Count(user.Username)
 	if failCount > srv.maxLoginFailCount {
@@ -540,6 +554,9 @@ func (srv *Server) login(c echo.Context) error {
 		}
 
 		if !isConsumeJSON(c) {
+			if ErrUserIPBlocked == err {
+				return srv.relogin(c, user, "用户不能在该地址访问")
+			}
 			return srv.relogin(c, user, "")
 		}
 
@@ -561,6 +578,7 @@ func (srv *Server) login(c echo.Context) error {
 
 		return ErrPasswordNotMatch
 	}
+
 	ticket, err := srv.tickets.NewTicket(user.Username, userData)
 	if err != nil {
 		log.Println("内部生成 ticket 失败 -", err)
@@ -572,6 +590,58 @@ func (srv *Server) login(c echo.Context) error {
 	}
 
 	return srv.loginOK(c, ticket, user.Service)
+}
+
+var localAddressList, _ = net.LookupHost("localhost")
+
+func (srv *Server) isLockedByAddress(c echo.Context, user *userLogin) bool {
+	if user.Username == "admin" {
+		return false
+	}
+
+	realAddr := c.RealIP()
+	if "" == realAddr {
+		return false
+	}
+	if "127.0.0.1" == realAddr {
+		srv.addressesByUserLock.Lock()
+		defer srv.addressesByUserLock.Unlock()
+		if srv.addressesByUser == nil {
+			srv.addressesByUser = map[string]string{}
+		}
+		srv.addressesByUser[user.Username] = realAddr
+		return false
+	}
+	for _, addr := range localAddressList {
+		if realAddr == addr {
+			srv.addressesByUserLock.Lock()
+			defer srv.addressesByUserLock.Unlock()
+			if srv.addressesByUser == nil {
+				srv.addressesByUser = map[string]string{}
+			}
+			srv.addressesByUser[user.Username] = realAddr
+			return false
+		}
+	}
+
+	srv.addressesByUserLock.Lock()
+	defer srv.addressesByUserLock.Unlock()
+
+	fmt.Println(srv.addressesByUser)
+	if len(srv.addressesByUser) == 0 {
+		srv.addressesByUser = map[string]string{user.Username: realAddr}
+		return false
+	} else if oldAddr, ok := srv.addressesByUser[user.Username]; !ok {
+		srv.addressesByUser[user.Username] = realAddr
+		return false
+	} else {
+		for _, excepted := range []string{"", realAddr} {
+			if excepted == oldAddr {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
@@ -599,15 +669,27 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 }
 
 func (srv *Server) logout(c echo.Context) error {
+	var ticket *Ticket
 	ticketString := srv.ticketGetter(c)
 	if ticketString != "" {
-		err := srv.tickets.RemoveTicket(ticketString)
+		var err error
+		ticket, err = srv.tickets.RemoveTicket(ticketString)
 		if err != nil {
 			log.Println("删除 ticket 失败 -", err)
 			return echo.NewHTTPError(http.StatusUnauthorized, "删除 ticket 失败 - "+err.Error())
 		}
 	} else {
 		log.Println("ticket 不存在")
+	}
+
+	if srv.IsLockByAddress && ticket != nil {
+		func() {
+			srv.addressesByUserLock.Lock()
+			defer srv.addressesByUserLock.Unlock()
+			if len(srv.addressesByUser) > 0 {
+				delete(srv.addressesByUser, ticket.Username)
+			}
+		}()
 	}
 
 	c.SetCookie(&http.Cookie{Name: srv.tokenName,
