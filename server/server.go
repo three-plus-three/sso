@@ -525,26 +525,27 @@ func (srv *Server) login(c echo.Context) error {
 		}
 	}
 
-	var failCount = srv.userLocks.Count(user.Username)
-	if failCount > srv.maxLoginFailCount {
-		if err := srv.userHandler.LockUser(user.Username); err != nil {
-			log.Println("lock", user.Username, "fail,", err)
-		}
-		user.LoginFailCount = failCount
-		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, "错误次数大多，帐号被锁定！")
-		}
+	/*
+		var failCount = srv.userLocks.Count(user.Username)
+		if failCount > srv.maxLoginFailCount && "admin" != user.Username {
+			if err := srv.userHandler.LockUser(user.Username); err != nil {
+				log.Println("lock", user.Username, "fail,", err)
+			}
+			user.LoginFailCount = failCount
+			if !isConsumeJSON(c) {
+				return srv.relogin(c, user, "错误次数大多，帐号被锁定！")
+			}
 
-		return ErrUserLocked
-	}
+			return ErrUserLocked
+		}
+	*/
 
 	authOK, userData, err := srv.auth.Auth(c.Request(), user.Username, user.Password)
 	if err != nil {
 		log.Println("用户授权失败 -", err)
 
-		if err == ErrPasswordNotMatch {
+		if err == ErrPasswordNotMatch && "admin" != user.Username {
 			srv.userLocks.FailOne(user.Username)
-
 			var failCount = srv.userLocks.Count(user.Username)
 			if failCount > srv.maxLoginFailCount {
 				if err := srv.userHandler.LockUser(user.Username); err != nil {
