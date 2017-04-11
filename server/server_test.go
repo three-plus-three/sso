@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -58,13 +60,25 @@ func MakeTestConfig() *Config {
 }
 
 var (
-	zhu_pwd    = "aaa"
+	adminPWD   = "admin"
+	zhuPWD     = "aaa"
 	testMethod = jwt.SigningMethodHS256
 	testKey    = []byte("asdfagsfe")
 
 	signTestParams = map[string]interface{}{"passwordHashAlg": testMethod.Alg(),
 		"passwordHashKey": string(testKey)}
+	userTestParams = map[string]interface{}{
+		"querySQL":  "SELECT * FROM users WHERE username = ?",
+		"lockSQL":   "UPDATE users SET locked_at = ? WHERE username = ?",
+		"unlockSQL": "UPDATE users SET locked_at = NULL WHERE username = ?",
+		"lockedSQL": "SELECT * FROM users WHERE locked_at IS NOT NULL",
+	}
 )
+
+func makeMD5(signingString string) string {
+	s, _ := testMethod.Sign(signingString, testKey)
+	return s
+}
 
 func startTest(t *testing.T, table string, config *Config) *serverTest {
 	dbDrv, dbURL := config.UserConfig.(*DbConfig).URL()
@@ -75,28 +89,27 @@ func startTest(t *testing.T, table string, config *Config) *serverTest {
 	}
 	defer db.Close()
 
-	makeMD5 := func(signingString string) string {
-		s, _ := testMethod.Sign(signingString, testKey)
-		return s
-	}
-
 	if table == "" {
 		table = "users"
 	}
 
 	_, err = db.Exec(`
-  DROP TABLE IF EXISTS ` + table + `;
+  DROP TABLE IF EXISTS ` + table + ` CASCADE;
   CREATE TABLE ` + table + ` (
   id             serial PRIMARY KEY,
   username       VARCHAR(200) NOT NULL,
   password        VARCHAR(100) NOT NULL,
+  white_addresses VARCHAR(100),
 
   email          VARCHAR(100),
-  location       VARCHAR(100)
+  location       VARCHAR(100),
+  locked_at      timestamp
 );
 
+insert into ` + table + `(username, password, email, location, white_addresses) values('admin', '` + adminPWD + `', 'admin@a.com', 'system user', '["192.168.1.2"]');
+insert into ` + table + `(username, password, email, location, white_addresses) values('white', '` + adminPWD + `', 'white@a.com', 'white user', '["192.168.1.2"]');
 insert into ` + table + `(username, password, email, location) values('mei', 'aat', 'mei@a.com', 'an hui');
-insert into ` + table + `(username, password, email, location) values('zhu', '` + makeMD5(zhu_pwd) + `', 'zhu@a.com', 'shanghai');
+insert into ` + table + `(username, password, email, location) values('zhu', '` + makeMD5(zhuPWD) + `', 'zhu@a.com', 'shanghai');
 `)
 
 	if err != nil {
@@ -189,7 +202,7 @@ func TestLoginWithMD5Hash(t *testing.T) {
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	ticket, err := srv.client.NewTicket("zhu", zhu_pwd)
+	ticket, err := srv.client.NewTicket("zhu", zhuPWD)
 	if err != nil {
 		t.Error(err)
 		return
@@ -227,12 +240,13 @@ func TestLoginWithMD5HashAndPasswordError(t *testing.T) {
 
 func TestLoginFailAndLocked(t *testing.T) {
 	config := MakeTestConfig()
+	config.UserConfig.(*DbConfig).Params = userTestParams
 	config.AuthConfig = signTestParams
 
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 5; i++ {
 		_, err := srv.client.NewTicket("zhu", "aaaa")
 		if err == nil {
 			t.Error("except error, but success")
@@ -247,7 +261,7 @@ func TestLoginFailAndLocked(t *testing.T) {
 		}
 	}
 
-	_, err := srv.client.NewTicket("zhu", zhu_pwd)
+	_, err := srv.client.NewTicket("zhu", zhuPWD)
 	if err == nil {
 		t.Error("except error, but success")
 		return
@@ -255,6 +269,118 @@ func TestLoginFailAndLocked(t *testing.T) {
 
 	if !strings.Contains(err.Error(), fmt.Sprint(ErrUserLocked.Message)) {
 		t.Error("except error code is ErrPasswordNotMatch, actual is", err)
+	}
+}
+
+func TestAdminLoginFailAndNotLocked(t *testing.T) {
+	config := MakeTestConfig()
+	config.UserConfig.(*DbConfig).Params = userTestParams
+	//config.AuthConfig = signTestParams
+
+	srv := startTest(t, "", config)
+	defer srv.Close()
+
+	for i := 0; i < 5; i++ {
+		_, err := srv.client.NewTicket("admin", "aaaa")
+		if err == nil {
+			t.Error("except error, but success")
+			return
+		}
+
+		if err != client.ErrPasswordNotMatch {
+			if strings.Contains(err.Error(), fmt.Sprint(ErrUserLocked.Message)) {
+				break
+			}
+			t.Error("except error code is ErrPasswordNotMatch, actual is", err)
+		}
+	}
+
+	_, err := srv.client.NewTicket("admin", adminPWD)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+}
+
+func TestAdminLoginOkAndIPNotBlock(t *testing.T) {
+	config := MakeTestConfig()
+	config.UserConfig.(*DbConfig).Params = userTestParams
+	//config.AuthConfig = signTestParams
+
+	srv := startTest(t, "", config)
+	defer srv.Close()
+
+	_, err := srv.client.NewTicket("admin", adminPWD)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+}
+
+func TestLoginFailAndIPBlock(t *testing.T) {
+	config := MakeTestConfig()
+	config.UserConfig.(*DbConfig).Params = userTestParams
+	//config.AuthConfig = signTestParams
+
+	srv := startTest(t, "", config)
+	defer srv.Close()
+
+	_, err := srv.client.NewTicket("white", adminPWD)
+	if err == nil {
+		t.Error("except error, but success")
+		return
+	}
+
+	if !strings.Contains(err.Error(), fmt.Sprint(ErrUserIPBlocked.Message)) {
+		t.Error("except error code is ErrUserIPBlocked, actual is", err)
+	}
+
+	newTicket := func(username, password string) error {
+		var buf = bytes.NewBuffer(make([]byte, 0, 4*1024))
+		err := json.NewEncoder(buf).Encode(map[string]interface{}{
+			"username": username,
+			"password": password})
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequest("POST", srv.client.RootURL()+"/login", buf)
+		if err != nil {
+			return err
+		}
+		req.Header.Set(HeaderXForwardedFor, "192.168.1.2")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		var bs []byte
+
+		if resp.Body != nil {
+			bs, _ = ioutil.ReadAll(resp.Body)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return &client.Error{Code: resp.StatusCode, Message: resp.Status}
+		}
+
+		newResponse := &struct {
+			ServiceTicket string `json:"ticket,omitempty"`
+			Error         string `json:"error,omitempty"`
+		}{}
+		if err := json.Unmarshal(bs, &newResponse); err != nil {
+			return err
+		}
+		if newResponse.Error != "" {
+			return errors.New(newResponse.Error)
+		}
+		return nil
+	}
+
+	err = newTicket("white", adminPWD)
+	if err != nil {
+		t.Error(err)
+		return
 	}
 }
 
@@ -266,7 +392,7 @@ func TestLoginWithQuerySQL(t *testing.T) {
 	srv := startTest(t, "hengwei_users", config)
 	defer srv.Close()
 
-	ticket, err := srv.client.NewTicket("zhu", zhu_pwd)
+	ticket, err := srv.client.NewTicket("zhu", zhuPWD)
 	if err != nil {
 		t.Error(err)
 		return

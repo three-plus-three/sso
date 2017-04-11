@@ -557,6 +557,8 @@ func (srv *Server) login(c echo.Context) error {
 		if !isConsumeJSON(c) {
 			if ErrUserIPBlocked == err {
 				return srv.relogin(c, user, "用户不能在该地址访问")
+			} else if err == ErrUserLocked {
+				return srv.relogin(c, user, "错误次数大多，帐号被锁定！")
 			}
 			return srv.relogin(c, user, "")
 		}
@@ -568,6 +570,9 @@ func (srv *Server) login(c echo.Context) error {
 			return err
 		}
 		if err == ErrUserLocked {
+			return err
+		}
+		if err == ErrUserIPBlocked {
 			return err
 		}
 		return echo.ErrUnauthorized

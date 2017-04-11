@@ -87,6 +87,10 @@ type Client struct {
 	tickets     map[string]*Ticket
 }
 
+func (c *Client) RootURL() string {
+	return c.rootURL
+}
+
 /*
 // Close 关闭 SSO 的客户端
 func (c *Client) Close() error {
@@ -176,7 +180,7 @@ func (c *Client) NewTicket(username, password string) (*Ticket, error) {
 		return nil, err
 	}
 	if newResponse.Error != "" {
-		return nil, err
+		return nil, errors.New(newResponse.Error)
 	}
 
 	return c.readTicket(newResponse.ServiceTicket)
