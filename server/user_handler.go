@@ -219,7 +219,7 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 		if o, ok := config.Params["white_address_list"]; ok && o != nil {
 			s, ok := o.(string)
 			if !ok {
-				return nil, errors.New("数据库配置中的 ingress_list 的值不是字符串")
+				return nil, errors.New("数据库配置中的 white_address_list 的值不是字符串")
 			}
 			if s = strings.TrimSpace(s); s != "" {
 				whiteIPListFieldName = s
