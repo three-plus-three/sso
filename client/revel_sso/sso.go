@@ -29,7 +29,7 @@ func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Requ
 			if serviceTicket == "" {
 				//c.RenderArgs["error"] = "ticket 为空"
 				//return c.RenderError(errors.New("访问授权系统失败 - 会话已注销"))
-				s := ssoClient.LoginURL(currentURL)
+				s := ssoClient.LoginURL(currentURL.String())
 				u, err := url.Parse(s)
 				if err != nil {
 					return c.RenderError(errors.New("SSO 的 URL 是无效的，" + err.Error() + "\r\n" + s))
