@@ -18,22 +18,30 @@ func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Requ
 		if sso.SessionIsExpiredOrMissing(c.Session[sso.SESSION_EXPIRE_KEY]) ||
 			sso.SessionIsInvalid(c.Session[sso.SESSION_VALID_KEY]) {
 
-			var currentURL string
+			var currentURL url.URL
 			if getURL != nil {
-				u := getURL(c.Request.Request)
-				currentURL = u.String()
+				currentURL = getURL(c.Request.Request)
 			} else {
-				currentURL = c.Request.Request.URL.String()
+				currentURL = *c.Request.Request.URL
 			}
 
 			serviceTicket := c.Params.Query.Get("ticket")
 			if serviceTicket == "" {
 				//c.RenderArgs["error"] = "ticket 为空"
 				//return c.RenderError(errors.New("访问授权系统失败 - 会话已注销"))
-				return c.Redirect(ssoClient.LoginURL(currentURL))
+				s := ssoClient.LoginURL(currentURL)
+				u, err := url.Parse(s)
+				if err != nil {
+					return c.RenderError(errors.New("SSO 的 URL 是无效的，" + err.Error() + "\r\n" + s))
+				}
+				u.Scheme = currentURL.Scheme
+				u.Host = currentURL.Host
+				u.User = currentURL.User
+				u.Opaque = currentURL.Opaque
+				return c.Redirect(u.String())
 			}
 
-			ticket, err := ssoClient.ValidateTicket(serviceTicket, currentURL)
+			ticket, err := ssoClient.ValidateTicket(serviceTicket, currentURL.String())
 			if err != nil {
 				c.Response.Status = http.StatusUnauthorized
 				return c.RenderError(errors.New("验证 ticket 失败，" + err.Error()))
