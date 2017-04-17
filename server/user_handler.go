@@ -25,7 +25,7 @@ var _ IPChecker = &net.IPNet{}
 type User interface {
 	Name() string
 	Password() string
-	CanUse(req *http.Request) (bool, error)
+	IsValid(address string) (bool, error)
 	//LockedAt() time.Time
 	//BlockIPList() []IPChecker
 	Data() map[string]interface{}
@@ -65,9 +65,8 @@ func RealIP(req *http.Request) string {
 	return ra
 }
 
-func (u *UserImpl) CanUse(req *http.Request) (bool, error) {
+func (u *UserImpl) IsValid(currentAddr string) (bool, error) {
 	if len(u.ingressIPList) != 0 && u.name != "admin" {
-		currentAddr := RealIP(req)
 		ip := net.ParseIP(currentAddr)
 		if ip == nil {
 			return false, errors.New("client address is invalid - '" + currentAddr + "'")
@@ -151,10 +150,10 @@ type LockedUser struct {
 
 // UserHandler 读用户配置的 Handler
 type UserHandler interface {
-	ReadUser(username string) ([]User, error)
-	LockUser(username string) error
-	UnlockUser(username string) error
-	LockedUsers() ([]LockedUser, error)
+	Read(username, address string) ([]User, error)
+	Lock(username string) error
+	Unlock(username string) error
+	Locked() ([]LockedUser, error)
 }
 
 type dbUserHandler struct {
@@ -429,7 +428,7 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 	}, nil
 }
 
-func (ah *dbUserHandler) ReadUser(username string) ([]User, error) {
+func (ah *dbUserHandler) Read(username, address string) ([]User, error) {
 	rows, err := ah.db.Query(ah.querySQL, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -476,7 +475,7 @@ func (ah *dbUserHandler) ReadUser(username string) ([]User, error) {
 	return users, nil
 }
 
-func (ah *dbUserHandler) LockedUsers() ([]LockedUser, error) {
+func (ah *dbUserHandler) Locked() ([]LockedUser, error) {
 	rows, err := ah.db.Query(ah.lockedSQL)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -520,7 +519,7 @@ func (ah *dbUserHandler) LockedUsers() ([]LockedUser, error) {
 	return users, nil
 }
 
-func (ah *dbUserHandler) LockUser(username string) error {
+func (ah *dbUserHandler) Lock(username string) error {
 	if ah.lockSQL == "" {
 		return nil
 	}
@@ -539,7 +538,7 @@ func (ah *dbUserHandler) LockUser(username string) error {
 	return nil
 }
 
-func (ah *dbUserHandler) UnlockUser(username string) error {
+func (ah *dbUserHandler) Unlock(username string) error {
 	if ah.unlockSQL == "" {
 		return nil
 	}

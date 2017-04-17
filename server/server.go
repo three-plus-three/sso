@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -65,7 +64,6 @@ type Config struct {
 	FooterTitleText string
 	LogoPath        string
 	TampletePaths   []string
-	IsLockByAddress bool
 
 	CookieDomain   string
 	CookiePath     string
@@ -167,6 +165,11 @@ func CreateServer(config *Config) (*Server, error) {
 		return nil, err
 	}
 
+	online, err := DefaultOnlineHandler(config.UserConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	authenticationHandler, err := DefaultAuthenticationHandler(userHandler, config.AuthConfig)
 	if err != nil {
 		return nil, err
@@ -208,7 +211,7 @@ func CreateServer(config *Config) (*Server, error) {
 		cookieHttpOnly:    config.CookieHttpOnly,
 		urlPrefix:         config.UrlPrefix,
 		welcomeURL:        config.WelcomeURL,
-		IsLockByAddress:   config.IsLockByAddress,
+		online:            online,
 		userHandler:       userHandler,
 		auth:              authenticationHandler,
 		tokenName:         tokenName,
@@ -291,15 +294,12 @@ type Server struct {
 	tokenName             string
 	maxLoginFailCount     int
 	userHandler           UserHandler
+	online                Online
 	auth                  AuthenticationHandler
 	tickets               TicketHandler
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
 	userLocks             UserLocks
-
-	IsLockByAddress     bool
-	addressesByUserLock sync.Mutex
-	addressesByUser     map[string]string
 
 	redirect func(c echo.Context, url string) error
 	data     map[string]interface{}
@@ -320,9 +320,11 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 	var err error
 	if name == "login.html" {
 		theme := c.QueryParam("theme")
-		t, err = r.loadTemplate("login_" + theme + ".html")
-		if err != nil {
-			fmt.Println(err)
+		if theme != "" {
+			t, err = r.loadTemplate("login_" + theme + ".html")
+			if err != nil {
+				fmt.Println(err)
+			}
 		}
 	}
 	if t == nil {
@@ -432,7 +434,7 @@ func (srv *Server) lockedUsers(c echo.Context) error {
 }
 
 func (srv *Server) lockedUsersWithError(c echo.Context, unlocked error) error {
-	users, err := srv.userHandler.LockedUsers()
+	users, err := srv.userHandler.Locked()
 	data := map[string]interface{}{"global": srv.data,
 		"users": users}
 	if err != nil {
@@ -457,7 +459,7 @@ func (srv *Server) userUnlock(c echo.Context) error {
 	}
 
 	username := c.QueryParam("username")
-	err = srv.userHandler.UnlockUser(username)
+	err = srv.userHandler.Unlock(username)
 	if err == nil {
 		srv.userLocks.Zero(username)
 	}
@@ -474,6 +476,7 @@ func (srv *Server) loginGet(c echo.Context) error {
 			if service == "" {
 				service = srv.welcomeURL
 			}
+
 			return srv.loginOK(c, ticket, service)
 		}
 	}
@@ -516,15 +519,6 @@ func (srv *Server) login(c echo.Context) error {
 		}
 		return echo.ErrUnauthorized
 	}
-	if srv.IsLockByAddress {
-		if locked := srv.isLockedByAddress(c, &user); locked {
-			if !isConsumeJSON(c) {
-				return srv.relogin(c, user, "用户已登录")
-			}
-			return echo.ErrUnauthorized
-		}
-	}
-
 	/*
 		var failCount = srv.userLocks.Count(user.Username)
 		if failCount > srv.maxLoginFailCount && "admin" != user.Username {
@@ -540,7 +534,7 @@ func (srv *Server) login(c echo.Context) error {
 		}
 	*/
 
-	authOK, userData, err := srv.auth.Auth(c.Request(), user.Username, user.Password)
+	authOK, userData, err := srv.auth.Auth(c.RealIP(), user.Username, user.Password)
 	if err != nil {
 		log.Println("用户授权失败 -", err)
 
@@ -548,7 +542,7 @@ func (srv *Server) login(c echo.Context) error {
 			srv.userLocks.FailOne(user.Username)
 			var failCount = srv.userLocks.Count(user.Username)
 			if failCount > srv.maxLoginFailCount {
-				if err := srv.userHandler.LockUser(user.Username); err != nil {
+				if err := srv.userHandler.Lock(user.Username); err != nil {
 					log.Println("lock", user.Username, "fail,", err)
 				}
 			}
@@ -598,59 +592,16 @@ func (srv *Server) login(c echo.Context) error {
 	return srv.loginOK(c, ticket, user.Service)
 }
 
-var localAddressList, _ = net.LookupHost("localhost")
-
-func (srv *Server) isLockedByAddress(c echo.Context, user *userLogin) bool {
-	if user.Username == "admin" {
-		return false
-	}
-
-	realAddr := c.RealIP()
-	if "" == realAddr {
-		return false
-	}
-	if "127.0.0.1" == realAddr {
-		srv.addressesByUserLock.Lock()
-		defer srv.addressesByUserLock.Unlock()
-		if srv.addressesByUser == nil {
-			srv.addressesByUser = map[string]string{}
-		}
-		srv.addressesByUser[user.Username] = realAddr
-		return false
-	}
-	for _, addr := range localAddressList {
-		if realAddr == addr {
-			srv.addressesByUserLock.Lock()
-			defer srv.addressesByUserLock.Unlock()
-			if srv.addressesByUser == nil {
-				srv.addressesByUser = map[string]string{}
-			}
-			srv.addressesByUser[user.Username] = realAddr
-			return false
-		}
-	}
-
-	srv.addressesByUserLock.Lock()
-	defer srv.addressesByUserLock.Unlock()
-
-	fmt.Println(srv.addressesByUser)
-	if len(srv.addressesByUser) == 0 {
-		srv.addressesByUser = map[string]string{user.Username: realAddr}
-		return false
-	} else if oldAddr, ok := srv.addressesByUser[user.Username]; !ok {
-		srv.addressesByUser[user.Username] = realAddr
-		return false
-	} else {
-		for _, excepted := range []string{"", realAddr} {
-			if excepted == oldAddr {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
+	err := srv.online.Save(&OnlineUserInfo{
+		Username:  ticket.Username,
+		Address:   c.RealIP(),
+		IssuedAt:  ticket.IssuedAt,
+		ExpiresAt: ticket.ExpiresAt})
+	if err != nil {
+		log.Println("创建在线用户失败 -", err)
+	}
+
 	serviceTicket := srv.authenticatingTickets.new(ticket, service)
 
 	c.SetCookie(&http.Cookie{Name: srv.tokenName,
@@ -688,14 +639,11 @@ func (srv *Server) logout(c echo.Context) error {
 		log.Println("ticket 不存在")
 	}
 
-	if srv.IsLockByAddress && ticket != nil {
-		func() {
-			srv.addressesByUserLock.Lock()
-			defer srv.addressesByUserLock.Unlock()
-			if len(srv.addressesByUser) > 0 {
-				delete(srv.addressesByUser, ticket.Username)
-			}
-		}()
+	if ticket != nil {
+		err := srv.online.Delete(ticket.Username, c.RealIP())
+		if err != nil {
+			log.Println("删除 在线用户 失败 -", err)
+		}
 	}
 
 	c.SetCookie(&http.Cookie{Name: srv.tokenName,

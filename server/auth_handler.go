@@ -1,16 +1,13 @@
 package server
 
-import (
-	"errors"
-	"net/http"
-)
+import "errors"
 
 // DefaultAuthenticationHandler 缺省 AuthenticationHandler
 var DefaultAuthenticationHandler = CreateUserAuthenticationHandler
 
 // AuthenticationHandler 验证用户并返回用户信息
 type AuthenticationHandler interface {
-	Auth(req *http.Request, username, password string) (bool, map[string]interface{}, error)
+	Auth(address, username, password string) (bool, map[string]interface{}, error)
 }
 
 func CreateUserAuthenticationHandler(userHandler UserHandler, config interface{}) (AuthenticationHandler, error) {
@@ -65,12 +62,12 @@ type userAuthenticationHandler struct {
 	secretKey     []byte
 }
 
-func (ah *userAuthenticationHandler) Auth(req *http.Request, username, password string) (bool, map[string]interface{}, error) {
+func (ah *userAuthenticationHandler) Auth(address, username, password string) (bool, map[string]interface{}, error) {
 	if username == "" {
 		return false, nil, ErrUsernameEmpty
 	}
 
-	users, err := ah.userHandler.ReadUser(username)
+	users, err := ah.userHandler.Read(username, address)
 	if err != nil {
 		return false, nil, err
 	}
@@ -81,7 +78,7 @@ func (ah *userAuthenticationHandler) Auth(req *http.Request, username, password 
 		return false, nil, ErrMutiUsers
 	}
 
-	ok, err := users[0].CanUse(req)
+	ok, err := users[0].IsValid(address)
 	if err != nil {
 		return false, nil, err
 	}
