@@ -272,6 +272,46 @@ func TestLoginFailAndLocked(t *testing.T) {
 	}
 }
 
+func TestLoginFailAndCountLessMaxNotLocked(t *testing.T) {
+	config := MakeTestConfig()
+	config.UserConfig.(*DbConfig).Params = userTestParams
+	config.AuthConfig = signTestParams
+	config.MaxLoginFailCount = 3
+
+	srv := startTest(t, "", config)
+	defer srv.Close()
+
+	for i := 0; i < config.MaxLoginFailCount; i++ {
+		_, err := srv.client.NewTicket("zhu", "aaaa")
+		if err == nil {
+			t.Error("except error, but success")
+			return
+		}
+
+		if err != client.ErrPasswordNotMatch {
+			t.Error("except error code is ErrPasswordNotMatch, actual is", err)
+		}
+	}
+
+	_, err := srv.client.NewTicket("zhu", zhuPWD)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	for i := 0; i < config.MaxLoginFailCount; i++ {
+		_, err := srv.client.NewTicket("zhu", "aaaa")
+		if err == nil {
+			t.Error("except error, but success")
+			return
+		}
+
+		if err != client.ErrPasswordNotMatch {
+			t.Error("except error code is ErrPasswordNotMatch, actual is", err)
+		}
+	}
+}
+
 func TestAdminLoginFailAndNotLocked(t *testing.T) {
 	config := MakeTestConfig()
 	config.UserConfig.(*DbConfig).Params = userTestParams

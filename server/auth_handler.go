@@ -7,7 +7,7 @@ var DefaultAuthenticationHandler = CreateUserAuthenticationHandler
 
 // AuthenticationHandler 验证用户并返回用户信息
 type AuthenticationHandler interface {
-	Auth(address, username, password string) (bool, map[string]interface{}, error)
+	Auth(address, username, password string) (map[string]interface{}, error)
 }
 
 func CreateUserAuthenticationHandler(userHandler UserHandler, config interface{}) (AuthenticationHandler, error) {
@@ -62,41 +62,41 @@ type userAuthenticationHandler struct {
 	secretKey     []byte
 }
 
-func (ah *userAuthenticationHandler) Auth(address, username, password string) (bool, map[string]interface{}, error) {
+func (ah *userAuthenticationHandler) Auth(address, username, password string) (map[string]interface{}, error) {
 	if username == "" {
-		return false, nil, ErrUsernameEmpty
+		return nil, ErrUsernameEmpty
 	}
 
 	users, err := ah.userHandler.Read(username, address)
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 	if len(users) == 0 {
-		return false, nil, ErrUserNotFound
+		return nil, ErrUserNotFound
 	}
 	if len(users) != 1 {
-		return false, nil, ErrMutiUsers
+		return nil, ErrMutiUsers
 	}
 
 	ok, err := users[0].IsValid(address)
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 	if !ok {
-		return false, nil, errors.New("user is inused")
+		return nil, errors.New("user is inused")
 	}
 
 	exceptedPassword := users[0].Password()
 	if exceptedPassword == "" {
-		return false, nil, ErrPasswordEmpty
+		return nil, ErrPasswordEmpty
 	}
 
 	err = ah.signingMethod.Verify(password, exceptedPassword, ah.secretKey)
 	if err != nil {
 		if err == ErrSignatureInvalid {
-			return false, nil, ErrPasswordNotMatch
+			return nil, ErrPasswordNotMatch
 		}
-		return false, nil, err
+		return nil, err
 	}
-	return true, users[0].Data(), nil
+	return users[0].Data(), nil
 }

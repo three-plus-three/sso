@@ -534,7 +534,7 @@ func (srv *Server) login(c echo.Context) error {
 		}
 	*/
 
-	authOK, userData, err := srv.auth.Auth(c.RealIP(), user.Username, user.Password)
+	userData, err := srv.auth.Auth(c.RealIP(), user.Username, user.Password)
 	if err != nil {
 		log.Println("用户授权失败 -", err)
 
@@ -571,13 +571,7 @@ func (srv *Server) login(c echo.Context) error {
 		}
 		return echo.ErrUnauthorized
 	}
-	if !authOK {
-		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, "")
-		}
-
-		return ErrPasswordNotMatch
-	}
+	srv.userLocks.Zero(user.Username)
 
 	ticket, err := srv.tickets.NewTicket(user.Username, userData)
 	if err != nil {
