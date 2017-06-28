@@ -365,17 +365,7 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	_, err := srv.client.NewTicket("white", adminPWD)
-	if err == nil {
-		t.Error("except error, but success")
-		return
-	}
-
-	if !strings.Contains(err.Error(), fmt.Sprint(ErrUserIPBlocked.Message)) {
-		t.Error("except error code is ErrUserIPBlocked, actual is", err)
-	}
-
-	newTicket := func(username, password string) error {
+	newTicket := func(username, password, ipaddress string) error {
 		var buf = bytes.NewBuffer(make([]byte, 0, 4*1024))
 		err := json.NewEncoder(buf).Encode(map[string]interface{}{
 			"username": username,
@@ -387,7 +377,7 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		req.Header.Set(HeaderXForwardedFor, "192.168.1.2")
+		req.Header.Set(HeaderXForwardedFor, ipaddress)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 
@@ -400,7 +390,11 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 		if resp.Body != nil {
 			bs, _ = ioutil.ReadAll(resp.Body)
 		}
+
 		if resp.StatusCode != http.StatusOK {
+			if len(bs) != 0 {
+				return &client.Error{Code: resp.StatusCode, Message: string(bs)}
+			}
 			return &client.Error{Code: resp.StatusCode, Message: resp.Status}
 		}
 
@@ -417,7 +411,17 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 		return nil
 	}
 
-	err = newTicket("white", adminPWD)
+	err := newTicket("white", adminPWD, "192.168.1.3")
+	if err == nil {
+		t.Error("except error, but success")
+		return
+	}
+
+	if !strings.Contains(err.Error(), fmt.Sprint(ErrUserIPBlocked.Message)) {
+		t.Error("except error code is ErrUserIPBlocked, actual is", err)
+	}
+
+	err = newTicket("white", adminPWD, "192.168.1.2")
 	if err != nil {
 		t.Error(err)
 		return

@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var localAddressList, _ = net.LookupHost("localhost")
+
 // DefaultUserHandler 缺省 UserHandler
 var DefaultUserHandler = createDbUserHandler
 
@@ -66,7 +68,7 @@ func RealIP(req *http.Request) string {
 }
 
 func (u *UserImpl) IsValid(currentAddr string) (bool, error) {
-	if len(u.ingressIPList) != 0 && u.name != "admin" {
+	if len(u.ingressIPList) != 0 {
 		ip := net.ParseIP(currentAddr)
 		if ip == nil {
 			return false, errors.New("client address is invalid - '" + currentAddr + "'")
@@ -79,10 +81,25 @@ func (u *UserImpl) IsValid(currentAddr string) (bool, error) {
 				break
 			}
 		}
+
 		if blocked {
-			return false, ErrUserIPBlocked
+			if "127.0.0.1" == currentAddr {
+				blocked = false
+			} else {
+				for _, addr := range localAddressList {
+					if currentAddr == addr {
+						blocked = false
+						break
+					}
+				}
+
+				if blocked {
+					return false, ErrUserIPBlocked
+				}
+			}
 		}
 	}
+
 	if !u.lockedAt.IsZero() {
 		if u.lockedTimeExpires == 0 {
 			return false, ErrUserLocked
