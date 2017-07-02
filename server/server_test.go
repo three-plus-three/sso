@@ -3,8 +3,6 @@ package server
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -34,13 +32,14 @@ var dbPassword = flag.String("db.password", "extreme", "")
 
 type serverTest struct {
 	srv    *Server
+	db     *sql.DB
 	hsrv   *httptest.Server
 	client *client.Client
 }
 
 func (srv *serverTest) Close() error {
 	srv.hsrv.Close()
-	return nil //srv.client.Close()
+	return srv.db.Close() //srv.client.Close()
 }
 
 func MakeTestConfig() *Config {
@@ -92,10 +91,11 @@ func startTest(t *testing.T, table string, config *Config) *serverTest {
 	if table == "" {
 		table = "users"
 	}
+	online_table := "online_users"
 
 	_, err = db.Exec(`
-  DROP TABLE IF EXISTS ` + table + ` CASCADE;
-  CREATE TABLE ` + table + ` (
+DROP TABLE IF EXISTS ` + table + ` CASCADE;
+CREATE TABLE ` + table + ` (
   id             serial PRIMARY KEY,
   username       VARCHAR(200) NOT NULL,
   password        VARCHAR(100) NOT NULL,
@@ -104,6 +104,16 @@ func startTest(t *testing.T, table string, config *Config) *serverTest {
   email          VARCHAR(100),
   location       VARCHAR(100),
   locked_at      timestamp
+);
+
+
+DROP TABLE IF EXISTS ` + online_table + ` CASCADE;
+CREATE TABLE ` + online_table + ` (
+  user_id        int PRIMARY KEY references ` + table + `(id),
+  address        VARCHAR(30) NOT NULL,
+
+  created_at      timestamp,
+  updated_at      timestamp
 );
 
 insert into ` + table + `(username, password, email, location, white_addresses) values('admin', '` + adminPWD + `', 'admin@a.com', 'system user', '["192.168.1.2"]');
@@ -133,7 +143,14 @@ insert into ` + table + `(username, password, email, location) values('zhu', '` 
 		t.FailNow()
 	}
 
+	conn, err := sql.Open(dbDrv, dbURL)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
 	return &serverTest{srv: srv,
+		db:     conn,
 		hsrv:   hsrv,
 		client: cli}
 }
@@ -365,53 +382,8 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	newTicket := func(username, password, ipaddress string) error {
-		var buf = bytes.NewBuffer(make([]byte, 0, 4*1024))
-		err := json.NewEncoder(buf).Encode(map[string]interface{}{
-			"username": username,
-			"password": password})
-		if err != nil {
-			return err
-		}
-		req, err := http.NewRequest("POST", srv.client.RootURL()+"/login", buf)
-		if err != nil {
-			return err
-		}
-		req.Header.Set(HeaderXForwardedFor, ipaddress)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
-		}
-		var bs []byte
-
-		if resp.Body != nil {
-			bs, _ = ioutil.ReadAll(resp.Body)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			if len(bs) != 0 {
-				return &client.Error{Code: resp.StatusCode, Message: string(bs)}
-			}
-			return &client.Error{Code: resp.StatusCode, Message: resp.Status}
-		}
-
-		newResponse := &struct {
-			ServiceTicket string `json:"ticket,omitempty"`
-			Error         string `json:"error,omitempty"`
-		}{}
-		if err := json.Unmarshal(bs, &newResponse); err != nil {
-			return err
-		}
-		if newResponse.Error != "" {
-			return errors.New(newResponse.Error)
-		}
-		return nil
-	}
-
-	err := newTicket("white", adminPWD, "192.168.1.3")
+	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.3")
+	_, err := srv.client.NewTicket("white", adminPWD)
 	if err == nil {
 		t.Error("except error, but success")
 		return
@@ -421,7 +393,8 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 		t.Error("except error code is ErrUserIPBlocked, actual is", err)
 	}
 
-	err = newTicket("white", adminPWD, "192.168.1.2")
+	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.2")
+	_, err = srv.client.NewTicket("white", adminPWD)
 	if err != nil {
 		t.Error(err)
 		return

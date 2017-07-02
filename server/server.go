@@ -53,6 +53,9 @@ var (
 
 	// ErrUnauthorizedService Service 是未授权的
 	ErrUnauthorizedService = echo.NewHTTPError(http.StatusUnauthorized, "service is unauthorized")
+
+	// ErrUserAlreadyOnline 用户已登录
+	ErrUserAlreadyOnline = echo.NewHTTPError(http.StatusUnauthorized, "user is already online")
 )
 
 // TicketGetter 从请求中获取票据
@@ -534,7 +537,43 @@ func (srv *Server) login(c echo.Context) error {
 		}
 	*/
 
-	userData, err := srv.auth.Auth(c.RealIP(), user.Username, user.Password)
+	hostAddress := c.RealIP()
+	if onlineList, err := srv.online.Query(user.Username); err != nil {
+		if !isConsumeJSON(c) {
+			return srv.relogin(c, user, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+	} else if len(onlineList) != 0 {
+		found := false
+		for _, ol := range onlineList {
+			if ol.Address == hostAddress {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			if len(onlineList) == 1 {
+				if !isConsumeJSON(c) {
+					return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
+						" 上于登录，最后一次活动时间为 "+
+						onlineList[0].UpdatedAt.Format(time.RFC3339))
+				}
+				return echo.NewHTTPError(http.StatusUnauthorized,
+					"user is already online, login with address is '"+
+						onlineList[0].Address+
+						"' and time is "+
+						onlineList[0].UpdatedAt.Format(time.RFC3339))
+			}
+
+			if !isConsumeJSON(c) {
+				return srv.relogin(c, user, "用户已在其他机器上登录")
+			}
+			return ErrUserAlreadyOnline
+		}
+	}
+
+	userData, err := srv.auth.Auth(hostAddress, user.Username, user.Password)
 	if err != nil {
 		log.Println("用户授权失败 -", err)
 
@@ -587,11 +626,7 @@ func (srv *Server) login(c echo.Context) error {
 }
 
 func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
-	err := srv.online.Save(&OnlineUserInfo{
-		Username:  ticket.Username,
-		Address:   c.RealIP(),
-		IssuedAt:  ticket.IssuedAt,
-		ExpiresAt: ticket.ExpiresAt})
+	err := srv.online.Save(ticket.Username, c.RealIP())
 	if err != nil {
 		log.Println("创建在线用户失败 -", err)
 	}
@@ -600,7 +635,7 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 
 	c.SetCookie(&http.Cookie{Name: srv.tokenName,
 		Value: ticket.Ticket,
-		Path:  "/",
+		Path:  srv.cookiePath,
 		// Expires: ticket.ExpiresAt, // 不指定过期时间，那么关闭浏览器后 cookie 会删除
 	})
 	if service != "" {
@@ -642,8 +677,8 @@ func (srv *Server) logout(c echo.Context) error {
 
 	c.SetCookie(&http.Cookie{Name: srv.tokenName,
 		Value:   "",
-		Path:    "/",
-		Expires: time.Now().Add(1 * time.Second),
+		Path:    srv.cookiePath,
+		Expires: time.Now(),
 		MaxAge:  -1})
 	for _, cookie := range srv.cookiesForLogout {
 		c.SetCookie(&http.Cookie{Name: cookie.Name,

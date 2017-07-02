@@ -178,6 +178,7 @@ func (jh *jwtTicketHandler) NewTicket(username string, data map[string]interface
 		Data:      res,
 	}
 	jh.tickets[t] = ticketObject
+
 	return ticketObject, nil
 }
 

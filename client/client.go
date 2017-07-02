@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"sync"
@@ -66,6 +67,7 @@ func NewClient(rootURL string) (*Client, error) {
 		rootURL: rootURL,
 		//interval: interval,
 	}
+	c.client.Jar, _ = cookiejar.New(nil)
 
 	//c.timer = time.AfterFunc(c.interval, c.onTimeout)
 	return c, nil
@@ -75,6 +77,7 @@ func NewClient(rootURL string) (*Client, error) {
 type Client struct {
 	client  http.Client
 	rootURL string
+	headers map[string]string
 
 	/*
 		closed     int32
@@ -89,6 +92,20 @@ type Client struct {
 
 func (c *Client) RootURL() string {
 	return c.rootURL
+}
+
+func (c *Client) SetHeader(k, v string) {
+	if c.headers == nil {
+		if v == "" {
+			return
+		}
+		c.headers = map[string]string{}
+	}
+	if v == "" {
+		delete(c.headers, k)
+	} else {
+		c.headers[k] = v
+	}
 }
 
 /*
@@ -148,6 +165,9 @@ func (c *Client) NewTicket(username, password string) (*Ticket, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -264,8 +284,9 @@ func (c *Client) RemoveTicket(serviceTicket string) error {
 		return nil
 	}
 
+	escapeST := url.QueryEscape(serviceTicket)
 	resp, err := c.client.Get(c.rootURL +
-		"/logout?ticket=" + url.QueryEscape(serviceTicket))
+		"/logout?ticket=" + escapeST)
 	if err != nil {
 		return err
 	}
