@@ -127,11 +127,11 @@ func GetValuesFromCookie(req *http.Request, sessionKey string, verify func(data,
 	if hyphen == -1 || hyphen >= len(cookie.Value)-1 {
 		return nil, errors.New("session cookie has invalid value")
 	}
-	sig, data := cookie.Value[:hyphen], cookie.Value[hyphen+1:]
+	data := cookie.Value[hyphen+1:]
 
 	// Verify the signature.
 	if verify != nil {
-		if !verify(data, sig) {
+		if !verify(data, cookie.Value[:hyphen]) {
 			return nil, errors.New("session cookie signature failed")
 		}
 	}
