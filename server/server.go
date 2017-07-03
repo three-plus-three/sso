@@ -557,13 +557,13 @@ func (srv *Server) login(c echo.Context) error {
 				if !isConsumeJSON(c) {
 					return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
 						" 上于登录，最后一次活动时间为 "+
-						onlineList[0].UpdatedAt.Format(time.RFC3339))
+						onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
 				}
 				return echo.NewHTTPError(http.StatusUnauthorized,
 					"user is already online, login with address is '"+
 						onlineList[0].Address+
 						"' and time is "+
-						onlineList[0].UpdatedAt.Format(time.RFC3339))
+						onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
 			}
 
 			if !isConsumeJSON(c) {
