@@ -538,38 +538,40 @@ func (srv *Server) login(c echo.Context) error {
 	*/
 
 	hostAddress := c.RealIP()
-	if onlineList, err := srv.online.Query(user.Username); err != nil {
-		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
-	} else if len(onlineList) != 0 {
-		found := false
-		for _, ol := range onlineList {
-			if ol.Address == hostAddress {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			if len(onlineList) == 1 {
-				if !isConsumeJSON(c) {
-					return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
-						" 上于登录，最后一次活动时间为 "+
-						onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
-				}
-				return echo.NewHTTPError(http.StatusUnauthorized,
-					"user is already online, login with address is '"+
-						onlineList[0].Address+
-						"' and time is "+
-						onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
-			}
-
+	if user.Username != "admin" || hostAddress != "127.0.0.1" {
+		if onlineList, err := srv.online.Query(user.Username); err != nil {
 			if !isConsumeJSON(c) {
-				return srv.relogin(c, user, "用户已在其他机器上登录")
+				return srv.relogin(c, user, err.Error())
 			}
-			return ErrUserAlreadyOnline
+			return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		} else if len(onlineList) != 0 {
+			found := false
+			for _, ol := range onlineList {
+				if ol.Address == hostAddress {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				if len(onlineList) == 1 {
+					if !isConsumeJSON(c) {
+						return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
+							" 上于登录，最后一次活动时间为 "+
+							onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
+					}
+					return echo.NewHTTPError(http.StatusUnauthorized,
+						"user is already online, login with address is '"+
+							onlineList[0].Address+
+							"' and time is "+
+							onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
+				}
+
+				if !isConsumeJSON(c) {
+					return srv.relogin(c, user, "用户已在其他机器上登录")
+				}
+				return ErrUserAlreadyOnline
+			}
 		}
 	}
 
