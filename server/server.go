@@ -63,6 +63,7 @@ type TicketGetter func(c echo.Context) string
 
 type Config struct {
 	UrlPrefix       string
+	PlayPath        string
 	HeaderTitleText string
 	FooterTitleText string
 	LogoPath        string
@@ -189,6 +190,7 @@ func CreateServer(config *Config) (*Server, error) {
 
 	variables := map[string]interface{}{}
 	variables["url_prefix"] = config.UrlPrefix
+	variables["play_path"] = config.PlayPath
 	variables["application_context"] = config.UrlPrefix
 	variables["header_title_text"] = config.HeaderTitleText
 	variables["footer_title_text"] = config.FooterTitleText
