@@ -62,6 +62,7 @@ var (
 type TicketGetter func(c echo.Context) string
 
 type Config struct {
+	Theme           string
 	UrlPrefix       string
 	PlayPath        string
 	HeaderTitleText string
@@ -214,6 +215,7 @@ func CreateServer(config *Config) (*Server, error) {
 		cookiePath:        config.CookiePath,
 		cookieSecure:      config.CookieSecure,
 		cookieHttpOnly:    config.CookieHttpOnly,
+		theme:             config.Theme,
 		urlPrefix:         config.UrlPrefix,
 		welcomeURL:        config.WelcomeURL,
 		online:            online,
@@ -290,6 +292,7 @@ func CreateServer(config *Config) (*Server, error) {
 // Server SSO 服务器
 type Server struct {
 	engine                *echo.Echo
+	theme                 string
 	cookieDomain          string
 	cookiePath            string
 	cookieSecure          bool
@@ -325,6 +328,10 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 	var err error
 	if name == "login.html" {
 		theme := c.QueryParam("theme")
+		if theme == "" {
+			theme = r.srv.theme
+		}
+
 		if theme != "" {
 			t, err = r.loadTemplate("login_" + theme + ".html")
 			if err != nil {
