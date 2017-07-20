@@ -425,11 +425,11 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type userLogin struct {
-	Username       string `json:"username" xml:"username" form:"username" query:"username"`
-	Password       string `json:"password" xml:"password" form:"password" query:"password"`
-	Service        string `json:"service" xml:"service" form:"service" query:"service"`
-	ForceLogin     string `json:"force" xml:"force" form:"force" query:"force"`
-	LoginFailCount int    `json:"login_fail_count" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
+	Username   string `json:"username" xml:"username" form:"username" query:"username"`
+	Password   string `json:"password" xml:"password" form:"password" query:"password"`
+	Service    string `json:"service" xml:"service" form:"service" query:"service"`
+	ForceLogin string `json:"force,omitempty" xml:"force" form:"force" query:"force"`
+	//LoginFailCount int    `json:"login_fail_count,omitempty" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
 }
 
 func (srv *Server) lockedUsers(c echo.Context) error {
@@ -514,10 +514,10 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 	}
 
 	data := map[string]interface{}{"global": srv.data,
-		"service":          user.Service,
-		"login_fail_count": user.LoginFailCount,
-		"username":         user.Username,
-		"errorMessage":     message,
+		"service": user.Service,
+		// "login_fail_count": user.LoginFailCount,
+		"username":     user.Username,
+		"errorMessage": message,
 	}
 	if err == ErrUserAlreadyOnline {
 		data["showForce"] = true
