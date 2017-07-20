@@ -3417,8 +3417,15 @@
                     </div>
                     <div class="form-group">
                         <input type="password" name="password" class="form-control" placeholder="密码">
-                    </div>{{if .errorMessage}}
-                    <div class="help text-danger">{{ .errorMessage }}</div>{{end}}
+                    </div>
+                    {{- if .showForce}}
+                    <div class="form-group">
+                        <input type="checkbox" class="span2" id="login.force" name="force" ><lable for="login.force">强制登录</lable>
+                    </div>
+                    {{- end}}
+                    {{- if .errorMessage}}
+                    <div class="help text-danger">{{ .errorMessage }}</div>
+                    {{- end}}
                     <input type=submit class="btn btn-primary btn-lg btn-block" value="登录" />
                 </form>
 

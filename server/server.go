@@ -428,6 +428,7 @@ type userLogin struct {
 	Username       string `json:"username" xml:"username" form:"username" query:"username"`
 	Password       string `json:"password" xml:"password" form:"password" query:"password"`
 	Service        string `json:"service" xml:"service" form:"service" query:"service"`
+	ForceLogin     string `json:"force" xml:"force" form:"force" query:"force"`
 	LoginFailCount int    `json:"login_fail_count" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
 }
 
@@ -507,7 +508,7 @@ func (srv *Server) loginGet(c echo.Context) error {
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
-func (srv *Server) relogin(c echo.Context, user userLogin, message string) error {
+func (srv *Server) relogin(c echo.Context, user userLogin, message string, err error) error {
 	if message == "" {
 		message = "用户名或密码不正确!"
 	}
@@ -518,6 +519,9 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string) error
 		"username":         user.Username,
 		"errorMessage":     message,
 	}
+	if err == ErrUserAlreadyOnline {
+		data["showForce"] = true
+	}
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
@@ -527,7 +531,11 @@ func (srv *Server) login(c echo.Context) error {
 		log.Println("登录数据的格式不正确 -", err)
 
 		if !isConsumeJSON(c) {
-			return c.Render(http.StatusOK, "login.html", srv.data)
+			data := map[string]interface{}{"global": srv.data,
+				"errorMessage": "登录数据的格式不正确",
+			}
+
+			return c.Render(http.StatusOK, "login.html", data)
 		}
 		return echo.ErrUnauthorized
 	}
@@ -547,39 +555,43 @@ func (srv *Server) login(c echo.Context) error {
 	*/
 
 	hostAddress := c.RealIP()
-	if user.Username != "admin" || hostAddress != "127.0.0.1" {
-		if onlineList, err := srv.online.Query(user.Username); err != nil {
-			if !isConsumeJSON(c) {
-				return srv.relogin(c, user, err.Error())
-			}
-			return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
-		} else if len(onlineList) != 0 {
-			found := false
-			for _, ol := range onlineList {
-				if ol.Address == hostAddress {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				if len(onlineList) == 1 {
-					if !isConsumeJSON(c) {
-						return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
-							" 上于登录，最后一次活动时间为 "+
-							onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
-					}
-					return echo.NewHTTPError(http.StatusUnauthorized,
-						"user is already online, login with address is '"+
-							onlineList[0].Address+
-							"' and time is "+
-							onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
-				}
-
+	if user.ForceLogin != "on" &&
+		user.ForceLogin != "true" &&
+		user.ForceLogin != "checked" {
+		if user.Username != "admin" || hostAddress != "127.0.0.1" {
+			if onlineList, err := srv.online.Query(user.Username); err != nil {
 				if !isConsumeJSON(c) {
-					return srv.relogin(c, user, "用户已在其他机器上登录")
+					return srv.relogin(c, user, err.Error(), err)
 				}
-				return ErrUserAlreadyOnline
+				return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+			} else if len(onlineList) != 0 {
+				found := false
+				for _, ol := range onlineList {
+					if ol.Address == hostAddress {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					if len(onlineList) == 1 {
+						if !isConsumeJSON(c) {
+							return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
+								" 上于登录，最后一次活动时间为 "+
+								onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"), ErrUserAlreadyOnline)
+						}
+						return echo.NewHTTPError(http.StatusUnauthorized,
+							"user is already online, login with address is '"+
+								onlineList[0].Address+
+								"' and time is "+
+								onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
+					}
+
+					if !isConsumeJSON(c) {
+						return srv.relogin(c, user, "用户已在其他机器上登录", ErrUserAlreadyOnline)
+					}
+					return ErrUserAlreadyOnline
+				}
 			}
 		}
 	}
@@ -600,11 +612,11 @@ func (srv *Server) login(c echo.Context) error {
 
 		if !isConsumeJSON(c) {
 			if ErrUserIPBlocked == err {
-				return srv.relogin(c, user, "用户不能在该地址访问")
+				return srv.relogin(c, user, "用户不能在该地址访问", err)
 			} else if err == ErrUserLocked {
-				return srv.relogin(c, user, "错误次数大多，帐号被锁定！")
+				return srv.relogin(c, user, "错误次数大多，帐号被锁定！", err)
 			}
-			return srv.relogin(c, user, "")
+			return srv.relogin(c, user, "", nil)
 		}
 
 		if err == ErrPasswordNotMatch {
@@ -628,7 +640,7 @@ func (srv *Server) login(c echo.Context) error {
 		log.Println("内部生成 ticket 失败 -", err)
 
 		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, "")
+			return srv.relogin(c, user, "", err)
 		}
 		return echo.ErrUnauthorized
 	}
