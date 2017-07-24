@@ -43,15 +43,15 @@
                             </span>
                             <input type="password" class="span2 required remove-manual" id="login.password" autocomplete="off" name="password" placeholder="请输入密码">
                         </div>
-                        {{- if .showForce}}
+                        {{- if .showForce }}
                         <div class="" style="display: inline-block;">
-                            <input type="checkbox" id="login.force" name="force" ><label for="login.force">强制登录</label>
+                            <label for="login.force"><input style="width:30px;" type="checkbox" id="login.force" name="force" >强制登录</label>
                         </div>
                         {{- end}}
                     </div> <!-- /login-fields -->
 
                     {{if .errorMessage -}}
-                    <div class="help text-danger">{{ .errorMessage }}</div>
+                    <div class="help text-danger" style="margin-top: 15px;">{{ .errorMessage }}</div>
                     {{- end}}
 
                     <div class="login-actions">
