@@ -274,6 +274,8 @@ func CreateServer(config *Config) (*Server, error) {
 
 			fs.ServeHTTP(w, r)
 		}))
+
+	srv.engine.GET(config.UrlPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.UrlPrefix, http.DefaultServeMux)))
 	srv.engine.GET(config.UrlPrefix+"/static/*", echo.WrapHandler(assetHandler))
 	srv.engine.GET(config.UrlPrefix+"/login", srv.loginGet)
 	srv.engine.POST(config.UrlPrefix+"/login", srv.login)
@@ -594,6 +596,8 @@ func (srv *Server) login(c echo.Context) error {
 				}
 			}
 		}
+	} else {
+		srv.online.Save(user.Username, hostAddress)
 	}
 
 	userData, err := srv.auth.Auth(hostAddress, user.Username, user.Password)

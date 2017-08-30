@@ -58,7 +58,9 @@ type dbOnline struct {
 	db                *sql.DB
 	querySQL          string
 	queryUserIDSQL    string
-	saveSQL           string
+	countSQL          string
+	insertSQL         string
+	updateSQL         string
 	deleteSQL         string
 	deleteWithAddress bool
 }
@@ -105,8 +107,18 @@ func (do *dbOnline) Save(username, address string) error {
 	if err != nil {
 		return err
 	}
-	_, err = do.db.Exec(do.saveSQL, userID, address)
-	return nil
+	var count int
+	err = do.db.QueryRow(do.countSQL, userID).Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		_, err = do.db.Exec(do.insertSQL, userID, address)
+	} else {
+		_, err = do.db.Exec(do.updateSQL, address, userID)
+	}
+	return err
 }
 
 func (do *dbOnline) Delete(username, address string) error {
@@ -133,66 +145,62 @@ func createDbOnline(params interface{}) (Online, error) {
 		"(updated_at + interval '1 hour') > now() AND " +
 		"EXISTS( SELECT * FROM users WHERE online_users.user_id = users.id AND username = ? )"
 	queryUserIDSQL := "SELECT id FROM users WHERE username = ?"
-	saveSQL := "INSERT INTO online_users(user_id, address, created_at, updated_at) VALUES(?, ?, now(), now())"
+	countSQL := "SELECT count(*) FROM online_users WHERE user_id = ?"
+	insertSQL := "INSERT INTO online_users(user_id, address, created_at, updated_at) VALUES(?, ?, now(), now())"
+	updateSQL := "UPDATE online_users SET address = ?, updated_at = now() WHERE user_id = ?"
 	deleteSQL := "DELETE FROM online_users WHERE EXISTS(SELECT * FROM users WHERE online_users.user_id = users.id AND username = ?)"
 	deleteWithAddress := false
 
 	if config.Params != nil {
-		if o, ok := config.Params["online.query"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 online.query 的值不是字符串")
-			}
-			if s = strings.TrimSpace(s); s != "" {
-				querySQL = s
-			}
+		if s, ok := stringWith(config.Params, "online.query"); !ok {
+			return nil, errors.New("数据库配置中的 online.query 的值不是字符串")
+		} else if s != "" {
+			querySQL = s
 		}
 
-		if o, ok := config.Params["online.queryUser"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 online.queryUser 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "" {
-				queryUserIDSQL = s
-			}
+		if s, ok := stringWith(config.Params, "online.queryUser"); !ok {
+			return nil, errors.New("数据库配置中的 online.queryUser 的值不是字符串")
+		} else if s != "" {
+			queryUserIDSQL = s
 		}
 
-		if o, ok := config.Params["online.save"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 online.save 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "" {
-				saveSQL = s
-			}
+		if s, ok := stringWith(config.Params, "online.count"); !ok {
+			return nil, errors.New("数据库配置中的 online.count 的值不是字符串")
+		} else if s != "" {
+			countSQL = s
 		}
 
-		if o, ok := config.Params["online.delete"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 online.delete 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "" {
-				deleteSQL = s
-			}
+		if s, ok := stringWith(config.Params, "online.insert"); !ok {
+			return nil, errors.New("数据库配置中的 online.insert 的值不是字符串")
+		} else if s != "" {
+			insertSQL = s
 		}
 
-		if o, ok := config.Params["online.withAddress"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 online.withAddress 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "true" {
-				deleteWithAddress = true
-			}
+		if s, ok := stringWith(config.Params, "online.update"); !ok {
+			return nil, errors.New("数据库配置中的 online.update 的值不是字符串")
+		} else if s != "" {
+			updateSQL = s
+		}
+
+		if s, ok := stringWith(config.Params, "online.delete"); !ok {
+			return nil, errors.New("数据库配置中的 online.delete 的值不是字符串")
+		} else if s != "" {
+			deleteSQL = s
+		}
+
+		if s, ok := stringWith(config.Params, "online.withAddress"); !ok {
+			return nil, errors.New("数据库配置中的 online.withAddress 的值不是字符串")
+		} else if s == "true" {
+			deleteWithAddress = true
 		}
 	}
 
 	if config.DbType == "postgres" || config.DbType == "postgresql" {
 		querySQL = ReplacePlaceholders(querySQL)
 		queryUserIDSQL = ReplacePlaceholders(queryUserIDSQL)
-		saveSQL = ReplacePlaceholders(saveSQL)
+		countSQL = ReplacePlaceholders(countSQL)
+		insertSQL = ReplacePlaceholders(insertSQL)
+		updateSQL = ReplacePlaceholders(updateSQL)
 		deleteSQL = ReplacePlaceholders(deleteSQL)
 	}
 
@@ -200,7 +208,9 @@ func createDbOnline(params interface{}) (Online, error) {
 		db:                db,
 		querySQL:          querySQL,
 		queryUserIDSQL:    queryUserIDSQL,
-		saveSQL:           saveSQL,
+		countSQL:          countSQL,
+		insertSQL:         insertSQL,
+		updateSQL:         updateSQL,
 		deleteSQL:         deleteSQL,
 		deleteWithAddress: deleteWithAddress,
 	}, nil
@@ -248,4 +258,17 @@ func (nt NullTime) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return nt.Time, nil
+}
+
+func stringWith(params map[string]interface{}, key string) (string, bool) {
+	o, ok := params[key]
+	if !ok || o == nil {
+		return "", true
+	}
+
+	s, ok := o.(string)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(s), true
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	_ "net/http/pprof"
 	"net/url"
 	"strings"
 	"testing"
@@ -38,6 +39,7 @@ type serverTest struct {
 }
 
 func (srv *serverTest) Close() error {
+	srv.hsrv.CloseClientConnections()
 	srv.hsrv.Close()
 	return srv.db.Close() //srv.client.Close()
 }

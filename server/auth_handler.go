@@ -1,6 +1,9 @@
 package server
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // DefaultAuthenticationHandler 缺省 AuthenticationHandler
 var DefaultAuthenticationHandler = CreateUserAuthenticationHandler
@@ -36,7 +39,7 @@ func CreateUserAuthenticationHandler(userHandler UserHandler, config interface{}
 				if !ok {
 					return nil, errors.New("数据库配置中的 passwordHashKey 的值不是字符串")
 				}
-				hashKey = s
+				hashKey = strings.TrimSpace(s)
 			}
 
 			signingMethod = GetSigningMethod(s)
