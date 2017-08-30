@@ -55,14 +55,14 @@ func onlineHandler(params interface{}) (Online, error) {
 var DefaultOnlineHandler = onlineHandler
 
 type dbOnline struct {
-	db                *sql.DB
-	querySQL          string
-	queryUserIDSQL    string
-	countSQL          string
-	insertSQL         string
-	updateSQL         string
-	deleteSQL         string
-	deleteWithAddress bool
+	db             *sql.DB
+	querySQL       string
+	queryUserIDSQL string
+	countSQL       string
+	insertSQL      string
+	updateSQL      string
+	deleteSQL      string
+	withAddress    bool
 }
 
 func (do *dbOnline) Query(username string) ([]OnlineInfo, error) {
@@ -108,7 +108,12 @@ func (do *dbOnline) Save(username, address string) error {
 		return err
 	}
 	var count int
-	err = do.db.QueryRow(do.countSQL, userID).Scan(&count)
+
+	if do.withAddress {
+		err = do.db.QueryRow(do.countSQL, userID, address).Scan(&count)
+	} else {
+		err = do.db.QueryRow(do.countSQL, userID).Scan(&count)
+	}
 	if err != nil {
 		return err
 	}
@@ -123,7 +128,7 @@ func (do *dbOnline) Save(username, address string) error {
 
 func (do *dbOnline) Delete(username, address string) error {
 	var err error
-	if do.deleteWithAddress {
+	if do.withAddress {
 		_, err = do.db.Exec(do.deleteSQL, username, address)
 	} else {
 		_, err = do.db.Exec(do.deleteSQL, username)
@@ -149,7 +154,7 @@ func createDbOnline(params interface{}) (Online, error) {
 	insertSQL := "INSERT INTO online_users(user_id, address, created_at, updated_at) VALUES(?, ?, now(), now())"
 	updateSQL := "UPDATE online_users SET address = ?, updated_at = now() WHERE user_id = ?"
 	deleteSQL := "DELETE FROM online_users WHERE EXISTS(SELECT * FROM users WHERE online_users.user_id = users.id AND username = ?)"
-	deleteWithAddress := false
+	withAddress := false
 
 	if config.Params != nil {
 		if s, ok := stringWith(config.Params, "online.query"); !ok {
@@ -191,7 +196,7 @@ func createDbOnline(params interface{}) (Online, error) {
 		if s, ok := stringWith(config.Params, "online.withAddress"); !ok {
 			return nil, errors.New("数据库配置中的 online.withAddress 的值不是字符串")
 		} else if s == "true" {
-			deleteWithAddress = true
+			withAddress = true
 		}
 	}
 
@@ -205,14 +210,14 @@ func createDbOnline(params interface{}) (Online, error) {
 	}
 
 	return &dbOnline{
-		db:                db,
-		querySQL:          querySQL,
-		queryUserIDSQL:    queryUserIDSQL,
-		countSQL:          countSQL,
-		insertSQL:         insertSQL,
-		updateSQL:         updateSQL,
-		deleteSQL:         deleteSQL,
-		deleteWithAddress: deleteWithAddress,
+		db:             db,
+		querySQL:       querySQL,
+		queryUserIDSQL: queryUserIDSQL,
+		countSQL:       countSQL,
+		insertSQL:      insertSQL,
+		updateSQL:      updateSQL,
+		deleteSQL:      deleteSQL,
+		withAddress:    withAddress,
 	}, nil
 }
 
