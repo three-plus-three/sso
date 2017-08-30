@@ -596,8 +596,6 @@ func (srv *Server) login(c echo.Context) error {
 				}
 			}
 		}
-	} else {
-		srv.online.Save(user.Username, hostAddress)
 	}
 
 	userData, err := srv.auth.Auth(hostAddress, user.Username, user.Password)
