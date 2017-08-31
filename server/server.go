@@ -434,6 +434,12 @@ type userLogin struct {
 	//LoginFailCount int    `json:"login_fail_count,omitempty" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
 }
 
+func (ul *userLogin) isForce() bool {
+	return ul.ForceLogin != "on" &&
+		ul.ForceLogin != "true" &&
+		ul.ForceLogin != "checked"
+}
+
 func (srv *Server) lockedUsers(c echo.Context) error {
 	ticketString := srv.ticketGetter(c)
 	if ticketString == "" {
@@ -527,6 +533,36 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
+func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user userLogin, onlineList []OnlineInfo) error {
+	if len(onlineList) == 1 {
+		if !isConsumeJSON(c) {
+			return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
+				" 上于登录，最后一次活动时间为 "+
+				onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"), ErrUserAlreadyOnline)
+		}
+		return echo.NewHTTPError(http.StatusUnauthorized,
+			"user is already online, login with address is '"+
+				onlineList[0].Address+
+				"' and time is "+
+				onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
+	}
+
+	if !isConsumeJSON(c) {
+		return srv.relogin(c, user, "用户已在其他机器上登录", ErrUserAlreadyOnline)
+	}
+	return ErrUserAlreadyOnline
+}
+
+func (srv *Server) LockUserIfNeed(c echo.Context, user userLogin) {
+	srv.userLocks.Fail(user.Username)
+	var failCount = srv.userLocks.Count(user.Username)
+	if failCount > srv.maxLoginFailCount {
+		if err := srv.userHandler.Lock(user.Username); err != nil {
+			log.Println("lock", user.Username, "fail,", err)
+		}
+	}
+}
+
 func (srv *Server) login(c echo.Context) error {
 	var user userLogin
 	if err := c.Bind(&user); err != nil {
@@ -541,60 +577,17 @@ func (srv *Server) login(c echo.Context) error {
 		}
 		return echo.ErrUnauthorized
 	}
-	/*
-		var failCount = srv.userLocks.Count(user.Username)
-		if failCount > srv.maxLoginFailCount && "admin" != user.Username {
-			if err := srv.userHandler.LockUser(user.Username); err != nil {
-				log.Println("lock", user.Username, "fail,", err)
-			}
-			user.LoginFailCount = failCount
-			if !isConsumeJSON(c) {
-				return srv.relogin(c, user, "错误次数大多，帐号被锁定！")
-			}
-
-			return ErrUserLocked
-		}
-	*/
 
 	hostAddress := c.RealIP()
-	if user.ForceLogin != "on" &&
-		user.ForceLogin != "true" &&
-		user.ForceLogin != "checked" {
-		if hostAddress != "127.0.0.1" {
-			if onlineList, err := srv.online.Query(user.Username); err != nil {
-				if !isConsumeJSON(c) {
-					return srv.relogin(c, user, err.Error(), err)
-				}
-				return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
-			} else if len(onlineList) != 0 {
-				found := false
-				for _, ol := range onlineList {
-					if ol.Address == hostAddress {
-						found = true
-						break
-					}
-				}
-
-				if !found {
-					if len(onlineList) == 1 {
-						if !isConsumeJSON(c) {
-							return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
-								" 上于登录，最后一次活动时间为 "+
-								onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"), ErrUserAlreadyOnline)
-						}
-						return echo.NewHTTPError(http.StatusUnauthorized,
-							"user is already online, login with address is '"+
-								onlineList[0].Address+
-								"' and time is "+
-								onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"))
-					}
-
-					if !isConsumeJSON(c) {
-						return srv.relogin(c, user, "用户已在其他机器上登录", ErrUserAlreadyOnline)
-					}
-					return ErrUserAlreadyOnline
-				}
+	if user.isForce() && hostAddress != "127.0.0.1" {
+		// 判断用户是不是已经在其它主机上登录
+		if onlineList, err := srv.online.Query(user.Username); err != nil {
+			if !isConsumeJSON(c) {
+				return srv.relogin(c, user, err.Error(), err)
 			}
+			return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		} else if len(onlineList) != 0 && !IsOnlined(onlineList, hostAddress) {
+			return srv.alreadyLoginOnOtherHost(c, user, onlineList)
 		}
 	}
 
@@ -603,13 +596,7 @@ func (srv *Server) login(c echo.Context) error {
 		log.Println("用户授权失败 -", err)
 
 		if err == ErrPasswordNotMatch && "admin" != user.Username {
-			srv.userLocks.FailOne(user.Username)
-			var failCount = srv.userLocks.Count(user.Username)
-			if failCount > srv.maxLoginFailCount {
-				if err := srv.userHandler.Lock(user.Username); err != nil {
-					log.Println("lock", user.Username, "fail,", err)
-				}
-			}
+			srv.LockUserIfNeed(c, user)
 		}
 
 		if !isConsumeJSON(c) {

@@ -6,7 +6,7 @@ import (
 
 type UserLocks interface {
 	Users() []string
-	FailOne(username string)
+	Fail(username string)
 	Count(username string) int
 	Zero(username string)
 }
@@ -22,7 +22,7 @@ func (mem *memLocks) Zero(username string) {
 	delete(mem.users, username)
 }
 
-func (mem *memLocks) FailOne(username string) {
+func (mem *memLocks) Fail(username string) {
 	mem.lock.Lock()
 	defer mem.lock.Unlock()
 	count := mem.users[username]

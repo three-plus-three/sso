@@ -15,6 +15,15 @@ type OnlineInfo struct {
 	UpdatedAt time.Time
 }
 
+func IsOnlined(onlineList []OnlineInfo, hostAddress string) bool {
+	for _, ol := range onlineList {
+		if ol.Address == hostAddress {
+			return true
+		}
+	}
+	return false
+}
+
 type Online interface {
 	Query(username string) ([]OnlineInfo, error)
 	Save(username, address string) error
