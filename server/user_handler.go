@@ -482,6 +482,9 @@ func (ah *dbUserHandler) Read(username, address string) ([]User, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// 从 data 中删除密码，确保它不会传给客户端
+		delete(user, ah.passwordName)
 		users = append(users, u)
 	}
 	if rows.Err() != nil {

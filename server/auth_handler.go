@@ -8,6 +8,8 @@ import (
 // DefaultAuthenticationHandler 缺省 AuthenticationHandler
 var DefaultAuthenticationHandler = CreateUserAuthenticationHandler
 
+type UserNotFound func(address, username, password string) (map[string]interface{}, error)
+
 // AuthenticationHandler 验证用户并返回用户信息
 type AuthenticationHandler interface {
 	Auth(address, username, password string) (map[string]interface{}, error)
@@ -25,6 +27,7 @@ func CreateUserAuthenticationHandler(userHandler UserHandler, config interface{}
 
 	var signingMethod SigningMethod = methodDefault
 	var secretKey []byte
+	var userNotFound func(address, username, password string) (map[string]interface{}, error)
 
 	if params != nil {
 		if o, ok := params["passwordHashAlg"]; ok && o != nil {
@@ -50,10 +53,15 @@ func CreateUserAuthenticationHandler(userHandler UserHandler, config interface{}
 				secretKey = []byte(hashKey)
 			}
 		}
+
+		if v, ok := params["user_not_found"]; ok && v != nil {
+			userNotFound, _ = v.(UserNotFound)
+		}
 	}
 
 	return &userAuthenticationHandler{
 		userHandler:   userHandler,
+		userNotFound:  userNotFound,
 		signingMethod: signingMethod,
 		secretKey:     secretKey,
 	}, nil
@@ -63,6 +71,7 @@ type userAuthenticationHandler struct {
 	userHandler   UserHandler
 	signingMethod SigningMethod
 	secretKey     []byte
+	userNotFound  UserNotFound
 }
 
 func (ah *userAuthenticationHandler) Auth(address, username, password string) (map[string]interface{}, error) {
@@ -75,6 +84,14 @@ func (ah *userAuthenticationHandler) Auth(address, username, password string) (m
 		return nil, err
 	}
 	if len(users) == 0 {
+		if ah.userNotFound != nil {
+			userData, err := ah.userNotFound(address, username, password)
+			if userData == nil && err == nil {
+				err = ErrUserNotFound
+			}
+			return userData, err
+		}
+
 		return nil, ErrUserNotFound
 	}
 	if len(users) != 1 {
