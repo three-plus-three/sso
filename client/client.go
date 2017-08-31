@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/cookiejar"
@@ -150,16 +151,8 @@ func (c *Client) LoginURL(service string) string {
 	return c.rootURL + "/login?service=" + url.QueryEscape(service)
 }
 
-// NewTicket 创建一个 Ticket
-func (c *Client) NewTicket(username, password string) (*Ticket, error) {
-	var buf = bytes.NewBuffer(make([]byte, 0, 4*1024))
-	err := json.NewEncoder(buf).Encode(map[string]interface{}{
-		"username": username,
-		"password": password})
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest("POST", c.rootURL+"/login", buf)
+func (c *Client) do(method, url string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +162,19 @@ func (c *Client) NewTicket(username, password string) (*Ticket, error) {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := c.client.Do(req)
+	return c.client.Do(req)
+}
+
+// NewTicket 创建一个 Ticket
+func (c *Client) NewTicket(username, password string) (*Ticket, error) {
+	var buf = bytes.NewBuffer(make([]byte, 0, 4*1024))
+	err := json.NewEncoder(buf).Encode(map[string]interface{}{
+		"username": username,
+		"password": password})
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do("POST", c.rootURL+"/login", buf)
 	if err != nil {
 		return nil, err
 	}
@@ -237,15 +242,9 @@ func (c *Client) readTicket(serviceTicket string) (*Ticket, error) {
 }
 
 func (c *Client) ValidateTicket(serviceTicket, service string) (*Ticket, error) {
-	req, err := http.NewRequest("GET",
+	resp, err := c.do("GET",
 		c.rootURL+"/verify?ticket="+url.QueryEscape(serviceTicket)+
 			"&service="+url.QueryEscape(service), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -284,9 +283,8 @@ func (c *Client) RemoveTicket(serviceTicket string) error {
 		return nil
 	}
 
-	escapeST := url.QueryEscape(serviceTicket)
-	resp, err := c.client.Get(c.rootURL +
-		"/logout?ticket=" + escapeST)
+	resp, err := c.do("GET",
+		c.rootURL+"/logout?ticket="+url.QueryEscape(serviceTicket), nil)
 	if err != nil {
 		return err
 	}
