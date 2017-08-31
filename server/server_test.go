@@ -161,7 +161,7 @@ func TestLoginWithUserNotFound(t *testing.T) {
 	srv := startTest(t, "", MakeTestConfig())
 	defer srv.Close()
 
-	_, err := srv.client.NewTicket("user_not_exists", "aat")
+	_, err := srv.client.NewTicket("user_not_exists", "aat", false)
 	if err == nil {
 		t.Error("except error, but success")
 		return
@@ -176,7 +176,7 @@ func TestLoginWithPasswordError(t *testing.T) {
 	srv := startTest(t, "", MakeTestConfig())
 	defer srv.Close()
 
-	_, err := srv.client.NewTicket("mei", "password_is_error")
+	_, err := srv.client.NewTicket("mei", "password_is_error", false)
 	if err == nil {
 		t.Error("except error, but success")
 		return
@@ -191,7 +191,7 @@ func TestLoginWithDefault(t *testing.T) {
 	srv := startTest(t, "", MakeTestConfig())
 	defer srv.Close()
 
-	ticket, err := srv.client.NewTicket("mei", "aat")
+	ticket, err := srv.client.NewTicket("mei", "aat", false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -221,7 +221,7 @@ func TestLoginWithMD5Hash(t *testing.T) {
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	ticket, err := srv.client.NewTicket("zhu", zhuPWD)
+	ticket, err := srv.client.NewTicket("zhu", zhuPWD, false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -246,7 +246,7 @@ func TestLoginWithMD5HashAndPasswordError(t *testing.T) {
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	_, err := srv.client.NewTicket("zhu", "aaaa")
+	_, err := srv.client.NewTicket("zhu", "aaaa", false)
 	if err == nil {
 		t.Error("except error, but success")
 		return
@@ -266,7 +266,7 @@ func TestLoginFailAndLocked(t *testing.T) {
 	defer srv.Close()
 
 	for i := 0; i < 5; i++ {
-		_, err := srv.client.NewTicket("zhu", "aaaa")
+		_, err := srv.client.NewTicket("zhu", "aaaa", false)
 		if err == nil {
 			t.Error("except error, but success")
 			return
@@ -280,7 +280,7 @@ func TestLoginFailAndLocked(t *testing.T) {
 		}
 	}
 
-	_, err := srv.client.NewTicket("zhu", zhuPWD)
+	_, err := srv.client.NewTicket("zhu", zhuPWD, false)
 	if err == nil {
 		t.Error("except error, but success")
 		return
@@ -301,7 +301,7 @@ func TestLoginFailAndCountLessMaxNotLocked(t *testing.T) {
 	defer srv.Close()
 
 	for i := 0; i < config.MaxLoginFailCount; i++ {
-		_, err := srv.client.NewTicket("zhu", "aaaa")
+		_, err := srv.client.NewTicket("zhu", "aaaa", false)
 		if err == nil {
 			t.Error("except error, but success")
 			return
@@ -312,14 +312,14 @@ func TestLoginFailAndCountLessMaxNotLocked(t *testing.T) {
 		}
 	}
 
-	_, err := srv.client.NewTicket("zhu", zhuPWD)
+	_, err := srv.client.NewTicket("zhu", zhuPWD, false)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
 	for i := 0; i < config.MaxLoginFailCount; i++ {
-		_, err := srv.client.NewTicket("zhu", "aaaa")
+		_, err := srv.client.NewTicket("zhu", "aaaa", false)
 		if err == nil {
 			t.Error("except error, but success")
 			return
@@ -340,7 +340,7 @@ func TestAdminLoginFailAndNotLocked(t *testing.T) {
 	defer srv.Close()
 
 	for i := 0; i < 5; i++ {
-		_, err := srv.client.NewTicket("admin", "aaaa")
+		_, err := srv.client.NewTicket("admin", "aaaa", false)
 		if err == nil {
 			t.Error("except error, but success")
 			return
@@ -354,7 +354,7 @@ func TestAdminLoginFailAndNotLocked(t *testing.T) {
 		}
 	}
 
-	_, err := srv.client.NewTicket("admin", adminPWD)
+	_, err := srv.client.NewTicket("admin", adminPWD, false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -369,7 +369,7 @@ func TestAdminLoginOkAndIPNotBlock(t *testing.T) {
 	srv := startTest(t, "", config)
 	defer srv.Close()
 
-	_, err := srv.client.NewTicket("admin", adminPWD)
+	_, err := srv.client.NewTicket("admin", adminPWD, false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -385,7 +385,7 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 	defer srv.Close()
 
 	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.3")
-	_, err := srv.client.NewTicket("white", adminPWD)
+	_, err := srv.client.NewTicket("white", adminPWD, false)
 	if err == nil {
 		t.Error("except error, but success")
 		return
@@ -396,7 +396,7 @@ func TestLoginFailAndIPBlock(t *testing.T) {
 	}
 
 	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.2")
-	_, err = srv.client.NewTicket("white", adminPWD)
+	_, err = srv.client.NewTicket("white", adminPWD, false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -411,7 +411,7 @@ func TestLoginWithQuerySQL(t *testing.T) {
 	srv := startTest(t, "hengwei_users", config)
 	defer srv.Close()
 
-	ticket, err := srv.client.NewTicket("zhu", zhuPWD)
+	ticket, err := srv.client.NewTicket("zhu", zhuPWD, false)
 	if err != nil {
 		t.Error(err)
 		return

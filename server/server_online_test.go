@@ -39,7 +39,7 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 	}
 
 	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.2")
-	ticket, err := srv.client.NewTicket("mei", "aat")
+	ticket, err := srv.client.NewTicket("mei", "aat", false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -48,7 +48,7 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 	assert("mei", 1)
 
 	// 确保再次登录是OK的
-	_, err = srv.client.NewTicket("mei", "aat")
+	_, err = srv.client.NewTicket("mei", "aat", false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -63,7 +63,7 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 	}
 
 	client2.SetHeader(HeaderXForwardedFor, "192.168.1.3")
-	_, err = client2.NewTicket("mei", "aat")
+	_, err = client2.NewTicket("mei", "aat", false)
 	if err == nil {
 		t.Error("except return user already online")
 		return
@@ -79,9 +79,71 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 		return
 	}
 
-	_, err = client2.NewTicket("mei", "aat")
+	_, err = client2.NewTicket("mei", "aat", false)
 	if err != nil {
 		t.Error(err)
 		return
 	}
+}
+
+func TestOnlineUserIsOkAfterAnotherLoginIsLogout(t *testing.T) {
+	config := MakeTestConfig()
+	config.UserConfig.(*DbConfig).Params = onlineUserTestParams
+	//config.AuthConfig = signTestParams
+
+	srv := startTest(t, "", config)
+	defer srv.Close()
+
+	var assert = func(username string, exceptCount int) {
+		var count int
+		err := srv.db.QueryRow("select count(*) from online_users where exists(select * from users where online_users.user_id = users.id and users.username = $1)", username).Scan(&count)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+
+		if count != exceptCount {
+			t.Error("except is", exceptCount, ", actual is", count)
+		}
+	}
+
+	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.2")
+	ticket, err := srv.client.NewTicket("mei", "aat", false)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	assert("mei", 1)
+
+	t.Log("确保再次登录是OK的")
+
+	_, err = srv.client.NewTicket("mei", "aat", false)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	assert("mei", 1)
+
+	client2, err := client.NewClient(srv.hsrv.URL)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
+	client2.SetHeader(HeaderXForwardedFor, "192.168.1.3")
+	_, err = client2.NewTicket("mei", "aat", true)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	assert("mei", 1)
+
+	err = srv.client.RemoveTicket(ticket.ServiceTicket)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	assert("mei", 1)
 }

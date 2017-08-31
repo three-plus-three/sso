@@ -166,11 +166,17 @@ func (c *Client) do(method, url string, body io.Reader) (*http.Response, error) 
 }
 
 // NewTicket 创建一个 Ticket
-func (c *Client) NewTicket(username, password string) (*Ticket, error) {
+func (c *Client) NewTicket(username, password string, force bool) (*Ticket, error) {
 	var buf = bytes.NewBuffer(make([]byte, 0, 4*1024))
+	forceStr := "false"
+	if force {
+		forceStr = "true"
+	}
+
 	err := json.NewEncoder(buf).Encode(map[string]interface{}{
 		"username": username,
-		"password": password})
+		"password": password,
+		"force":    forceStr})
 	if err != nil {
 		return nil, err
 	}
