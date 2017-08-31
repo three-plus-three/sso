@@ -656,6 +656,9 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 		if err == nil {
 			queryParams := u.Query()
 			queryParams.Set("ticket", serviceTicket)
+			if o := ticket.Data["is_new"]; o != nil {
+				queryParams.Set("is_new", fmt.Sprint(o))
+			}
 			u.RawQuery = queryParams.Encode()
 			returnURL = u.String()
 		}
