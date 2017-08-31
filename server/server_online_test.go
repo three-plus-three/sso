@@ -3,6 +3,8 @@ package server
 import (
 	"strings"
 	"testing"
+
+	"github.com/three-plus-three/sso/client"
 )
 
 var (
@@ -54,8 +56,14 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 
 	assert("mei", 1)
 
-	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.3")
-	_, err = srv.client.NewTicket("mei", "aat")
+	client2, err := client.NewClient(srv.hsrv.URL)
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
+	client2.SetHeader(HeaderXForwardedFor, "192.168.1.3")
+	_, err = client2.NewTicket("mei", "aat")
 	if err == nil {
 		t.Error("except return user already online")
 		return
@@ -64,13 +72,14 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 		return
 	}
 
+	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.2")
 	err = srv.client.RemoveTicket(ticket.ServiceTicket)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
-	_, err = srv.client.NewTicket("mei", "aat")
+	_, err = client2.NewTicket("mei", "aat")
 	if err != nil {
 		t.Error(err)
 		return

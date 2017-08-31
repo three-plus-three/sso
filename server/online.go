@@ -127,12 +127,7 @@ func (do *dbOnline) Save(username, address string) error {
 }
 
 func (do *dbOnline) Delete(username, address string) error {
-	var err error
-	if do.withAddress {
-		_, err = do.db.Exec(do.deleteSQL, username, address)
-	} else {
-		_, err = do.db.Exec(do.deleteSQL, username)
-	}
+	_, err := do.db.Exec(do.deleteSQL, username, address)
 	return err
 }
 
@@ -153,7 +148,7 @@ func createDbOnline(params interface{}) (Online, error) {
 	countSQL := "SELECT count(*) FROM online_users WHERE user_id = ?"
 	insertSQL := "INSERT INTO online_users(user_id, address, created_at, updated_at) VALUES(?, ?, now(), now())"
 	updateSQL := "UPDATE online_users SET address = ?, updated_at = now() WHERE user_id = ?"
-	deleteSQL := "DELETE FROM online_users WHERE EXISTS(SELECT * FROM users WHERE online_users.user_id = users.id AND username = ?)"
+	deleteSQL := "DELETE FROM online_users WHERE EXISTS(SELECT * FROM users WHERE online_users.user_id = users.id AND username = ?) AND address = ?"
 	withAddress := false
 
 	if config.Params != nil {

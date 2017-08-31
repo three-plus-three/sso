@@ -337,7 +337,7 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 		if theme != "" {
 			t, err = r.loadTemplate("login_" + theme + ".html")
 			if err != nil {
-				fmt.Println(err)
+				log.Println("[warn] load login_"+theme+".html", err)
 			}
 		}
 	}
@@ -560,7 +560,7 @@ func (srv *Server) login(c echo.Context) error {
 	if user.ForceLogin != "on" &&
 		user.ForceLogin != "true" &&
 		user.ForceLogin != "checked" {
-		if user.Username != "admin" || hostAddress != "127.0.0.1" {
+		if hostAddress != "127.0.0.1" {
 			if onlineList, err := srv.online.Query(user.Username); err != nil {
 				if !isConsumeJSON(c) {
 					return srv.relogin(c, user, err.Error(), err)
