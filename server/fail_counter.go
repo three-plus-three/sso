@@ -4,25 +4,25 @@ import (
 	"sync"
 )
 
-type UserLocks interface {
+type FailCounter interface {
 	Users() []string
 	Fail(username string)
 	Count(username string) int
 	Zero(username string)
 }
 
-type memLocks struct {
+type memFailCounter struct {
 	lock  sync.Mutex
 	users map[string]int
 }
 
-func (mem *memLocks) Zero(username string) {
+func (mem *memFailCounter) Zero(username string) {
 	mem.lock.Lock()
 	defer mem.lock.Unlock()
 	delete(mem.users, username)
 }
 
-func (mem *memLocks) Fail(username string) {
+func (mem *memFailCounter) Fail(username string) {
 	mem.lock.Lock()
 	defer mem.lock.Unlock()
 	count := mem.users[username]
@@ -30,13 +30,13 @@ func (mem *memLocks) Fail(username string) {
 	mem.users[username] = count
 }
 
-func (mem *memLocks) Count(username string) int {
+func (mem *memFailCounter) Count(username string) int {
 	mem.lock.Lock()
 	defer mem.lock.Unlock()
 	return mem.users[username]
 }
 
-func (mem *memLocks) Users() []string {
+func (mem *memFailCounter) Users() []string {
 	mem.lock.Lock()
 	defer mem.lock.Unlock()
 	users := make([]string, 0, len(mem.users))
@@ -46,6 +46,6 @@ func (mem *memLocks) Users() []string {
 	return users
 }
 
-var CreateUserLocks = func() UserLocks {
-	return &memLocks{users: map[string]int{}}
+var createFailCounter = func() FailCounter {
+	return &memFailCounter{users: map[string]int{}}
 }

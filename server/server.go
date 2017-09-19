@@ -64,6 +64,12 @@ var (
 // TicketGetter 从请求中获取票据
 type TicketGetter func(c echo.Context) string
 
+// UserNotFound 用户不存在时的回调
+type UserNotFound func(address, username, password string) (map[string]interface{}, error)
+
+// VerifyFunc 用户验证回调类型，method 为扩展类型， username, password 为界面上用户填写的
+type VerifyFunc func(method, username, password string) error
+
 // Config 服务的配置项
 type Config struct {
 	Theme           string
@@ -94,33 +100,10 @@ type Config struct {
 
 // DbConfig 服务的数据库配置项
 type DbConfig struct {
-	DbType   string
-	Address  string
-	Port     string
-	DbName   string
-	Username string
-	Password string
+	DbType string
+	DbURL  string
 
 	Params map[string]interface{}
-}
-
-func (db *DbConfig) URL() (string, string) {
-	switch db.DbType {
-	case "postgresql", "postgres":
-		if db.Port == "" {
-			db.Port = "5432"
-		}
-		return "postgres", fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=disable",
-			db.Address, db.Port, db.DbName, db.Username, db.Password)
-	case "mysql":
-		if db.Port == "" {
-			db.Port = "3306"
-		}
-		return "mysql", fmt.Sprintf("%s:%s@tcp(%s:%s)/%s",
-			db.Username, db.Password, db.Address, db.Port, db.DbName)
-	default:
-		panic(errors.New("unknown db type - " + db.DbType))
-	}
 }
 
 // CreateServer 创建一个 sso 服务
@@ -166,11 +149,8 @@ func CreateServer(config *Config) (*Server, error) {
 	if DefaultUserHandler == nil {
 		DefaultUserHandler = createDbUserHandler
 	}
-	if DefaultAuthenticationHandler == nil {
-		DefaultAuthenticationHandler = CreateUserAuthenticationHandler
-	}
 
-	userHandler, err := DefaultUserHandler(config.UserConfig)
+	userHandler, err := DefaultUserHandler(config)
 	if err != nil {
 		return nil, err
 	}
@@ -180,10 +160,10 @@ func CreateServer(config *Config) (*Server, error) {
 		return nil, err
 	}
 
-	authenticationHandler, err := DefaultAuthenticationHandler(userHandler, config.AuthConfig)
-	if err != nil {
-		return nil, err
-	}
+	// authenticationHandler, err := DefaultAuthenticationHandler(userHandler, config.AuthConfig)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	factory := TicketHandlerFactories[config.TicketProtocol]
 	if factory == nil {
@@ -225,7 +205,6 @@ func CreateServer(config *Config) (*Server, error) {
 		welcomeURL:        config.WelcomeURL,
 		online:            online,
 		userHandler:       userHandler,
-		auth:              authenticationHandler,
 		tokenName:         tokenName,
 		maxLoginFailCount: config.MaxLoginFailCount,
 		ticketGetter:      ticketGetter,
@@ -234,7 +213,7 @@ func CreateServer(config *Config) (*Server, error) {
 			timeout: 1 * time.Minute,
 			tickets: map[string]*authenticatingTicket{},
 		},
-		userLocks: CreateUserLocks(),
+		failCounter: createFailCounter(),
 		redirect: func(c echo.Context, toURL string) error {
 			return c.Redirect(http.StatusTemporaryRedirect, toURL)
 		},
@@ -309,12 +288,12 @@ type Server struct {
 	tokenName             string
 	maxLoginFailCount     int
 	userHandler           UserHandler
+	userNotFound          UserNotFound
 	online                Online
-	auth                  AuthenticationHandler
 	tickets               TicketHandler
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
-	userLocks             UserLocks
+	failCounter           FailCounter
 
 	redirect func(c echo.Context, url string) error
 	data     map[string]interface{}
@@ -487,7 +466,7 @@ func (srv *Server) userUnlock(c echo.Context) error {
 	username := c.QueryParam("username")
 	err = srv.userHandler.Unlock(username)
 	if err == nil {
-		srv.userLocks.Zero(username)
+		srv.failCounter.Zero(username)
 	}
 	return srv.lockedUsersWithError(c, err)
 }
@@ -522,8 +501,16 @@ func (srv *Server) loginGet(c echo.Context) error {
 }
 
 func (srv *Server) relogin(c echo.Context, user userLogin, message string, err error) error {
-	if message == "" {
-		message = "用户名或密码不正确!"
+	if ErrUserIPBlocked == err {
+		message = "用户不能在该地址访问"
+	} else if err == ErrUserLocked {
+		message = "错误次数大多，帐号被锁定！"
+	} else if err == ErrPermissionDenied {
+		message = "用户没有访问权限"
+	} else {
+		if message == "" {
+			message = "用户名或密码不正确!"
+		}
 	}
 
 	data := map[string]interface{}{"global": srv.data,
@@ -558,9 +545,9 @@ func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user userLogin, onlin
 	return ErrUserAlreadyOnline
 }
 
-func (srv *Server) LockUserIfNeed(c echo.Context, user userLogin) {
-	srv.userLocks.Fail(user.Username)
-	var failCount = srv.userLocks.Count(user.Username)
+func (srv *Server) lockUserIfNeed(c echo.Context, user userLogin) {
+	srv.failCounter.Fail(user.Username)
+	var failCount = srv.failCounter.Count(user.Username)
 	if failCount > srv.maxLoginFailCount {
 		if err := srv.userHandler.Lock(user.Username); err != nil {
 			log.Println("lock", user.Username, "fail,", err)
@@ -582,6 +569,9 @@ func (srv *Server) login(c echo.Context) error {
 		}
 		return echo.ErrUnauthorized
 	}
+	if user.Username == "" {
+		return srv.relogin(c, user, "请输入用户名", nil)
+	}
 
 	hostAddress := c.RealIP()
 	if user.isForce() && hostAddress != "127.0.0.1" {
@@ -596,41 +586,52 @@ func (srv *Server) login(c echo.Context) error {
 		}
 	}
 
-	userData, err := srv.auth.Auth(hostAddress, user.Username, user.Password)
+	var userData map[string]interface{}
+
+	auth, err := srv.userHandler.Read(user.Username)
+	if err != nil || auth == nil {
+		if err == nil {
+			err = ErrUserNotFound
+		}
+		if ErrUserNotFound == err && srv.userNotFound != nil {
+			userData, err = srv.userNotFound(hostAddress, user.Username, user.Password)
+			if userData == nil && err == nil {
+				err = ErrUserNotFound
+			}
+		}
+	} else {
+		err = auth.Auth(hostAddress, user.Password)
+		if err == nil {
+			userData = auth.Data()
+		}
+	}
+
 	if err != nil {
 		log.Println("用户授权失败 -", err)
 
-		if err == ErrPasswordNotMatch && "admin" != user.Username {
-			srv.LockUserIfNeed(c, user)
+		// auth == nil 是说明不是用户，不必计数
+		if auth != nil && err == ErrPasswordNotMatch && "admin" != user.Username {
+			srv.lockUserIfNeed(c, user)
 		}
 
 		if !isConsumeJSON(c) {
-			if ErrUserIPBlocked == err {
-				return srv.relogin(c, user, "用户不能在该地址访问", err)
-			} else if err == ErrUserLocked {
-				return srv.relogin(c, user, "错误次数大多，帐号被锁定！", err)
-			} else if err == ErrPermissionDenied {
-				return srv.relogin(c, user, "用户没有访问权限", err)
-			}
-
 			return srv.relogin(c, user, "", nil)
 		}
 
-		if err == ErrPasswordNotMatch {
-			return err
-		}
-		if err == ErrUserNotFound {
-			return err
-		}
-		if err == ErrUserLocked {
-			return err
-		}
-		if err == ErrUserIPBlocked {
-			return err
+		// 不要将过多的信息暴露给用户，仅将特定的信息返回
+		for _, excepted := range []error{
+			ErrPasswordNotMatch,
+			ErrUserNotFound,
+			ErrUserLocked,
+			ErrUserIPBlocked,
+		} {
+			if err == excepted {
+				return err
+			}
 		}
 		return echo.ErrUnauthorized
 	}
-	srv.userLocks.Zero(user.Username)
+	srv.failCounter.Zero(user.Username)
 
 	ticket, err := srv.tickets.NewTicket(user.Username, userData)
 	if err != nil {

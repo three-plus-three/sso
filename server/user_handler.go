@@ -3,162 +3,13 @@ package server
 import (
 	"bytes"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"strings"
 	"time"
 )
-
-var localAddressList, _ = net.LookupHost("localhost")
-
-// DefaultUserHandler 缺省 UserHandler
-var DefaultUserHandler = createDbUserHandler
-
-type IPChecker interface {
-	Contains(net.IP) bool
-}
-
-var _ IPChecker = &net.IPNet{}
-
-type User interface {
-	Name() string
-	Password() string
-	IsValid(address string) (bool, error)
-	//LockedAt() time.Time
-	//BlockIPList() []IPChecker
-	Data() map[string]interface{}
-}
-
-type UserImpl struct {
-	name              string
-	password          string
-	lockedAt          time.Time
-	lockedTimeExpires time.Duration
-	ingressIPList     []IPChecker
-	data              map[string]interface{}
-}
-
-func (u *UserImpl) Name() string {
-	return u.name
-}
-
-func (u *UserImpl) Password() string {
-	return u.password
-}
-
-const (
-	HeaderXForwardedFor = "X-Forwarded-For"
-	HeaderXRealIP       = "X-Real-IP"
-)
-
-func RealIP(req *http.Request) string {
-	ra := req.RemoteAddr
-	if ip := req.Header.Get(HeaderXForwardedFor); ip != "" {
-		ra = ip
-	} else if ip := req.Header.Get(HeaderXRealIP); ip != "" {
-		ra = ip
-	} else {
-		ra, _, _ = net.SplitHostPort(ra)
-	}
-	return ra
-}
-
-func (u *UserImpl) IsValid(currentAddr string) (bool, error) {
-	if len(u.ingressIPList) != 0 {
-		ip := net.ParseIP(currentAddr)
-		if ip == nil {
-			return false, errors.New("client address is invalid - '" + currentAddr + "'")
-		}
-
-		blocked := true
-		for _, checker := range u.ingressIPList {
-			if checker.Contains(ip) {
-				blocked = false
-				break
-			}
-		}
-
-		if blocked {
-			if "127.0.0.1" == currentAddr {
-				blocked = false
-			} else {
-				for _, addr := range localAddressList {
-					if currentAddr == addr {
-						blocked = false
-						break
-					}
-				}
-
-				if blocked {
-					return false, ErrUserIPBlocked
-				}
-			}
-		}
-	}
-
-	if !u.lockedAt.IsZero() {
-		if u.lockedTimeExpires == 0 {
-			return false, ErrUserLocked
-		}
-		if time.Now().Before(u.lockedAt.Add(u.lockedTimeExpires)) {
-			return false, ErrUserLocked
-		}
-	}
-	return true, nil
-}
-
-func (u *UserImpl) Data() map[string]interface{} {
-	return u.data
-}
-
-type ipRange struct {
-	start, end uint32
-}
-
-func (r *ipRange) String() string {
-	var a, b [4]byte
-	binary.BigEndian.PutUint32(a[:], r.start)
-	binary.BigEndian.PutUint32(b[:], r.end)
-	return net.IP(a[:]).String() + "-" +
-		net.IP(b[:]).String()
-}
-
-func (r *ipRange) Contains(ip net.IP) bool {
-	if ip.To4() == nil {
-		return false
-	}
-
-	v := binary.BigEndian.Uint32(ip.To4())
-	return r.start <= v && v <= r.end
-}
-
-func IPRange(start, end net.IP) (IPChecker, error) {
-	if start.To4() == nil {
-		return nil, errors.New("ip range 不支持 IPv6")
-	}
-	if end.To4() == nil {
-		return nil, errors.New("ip range 不支持 IPv6")
-	}
-	s := binary.BigEndian.Uint32(start.To4())
-	e := binary.BigEndian.Uint32(end.To4())
-	return &ipRange{start: s, end: e}, nil
-}
-
-func IPRangeWith(start, end string) (IPChecker, error) {
-	s := net.ParseIP(start)
-	if s == nil {
-		return nil, errors.New(start + " is invalid address")
-	}
-	e := net.ParseIP(end)
-	if e == nil {
-		return nil, errors.New(end + " is invalid address")
-	}
-	return IPRange(s, e)
-}
 
 type LockedUser struct {
 	Name     string
@@ -167,7 +18,7 @@ type LockedUser struct {
 
 // UserHandler 读用户配置的 Handler
 type UserHandler interface {
-	Read(username, address string) ([]User, error)
+	Read(username string) (User, error)
 	Lock(username string) error
 	Unlock(username string) error
 	Locked() ([]LockedUser, error)
@@ -175,149 +26,135 @@ type UserHandler interface {
 
 type dbUserHandler struct {
 	db                   *sql.DB
+	externalVerify       VerifyFunc
+	verify               func(string, string) error
 	querySQL             string
 	lockSQL              string
 	unlockSQL            string
 	lockedSQL            string
 	userFieldName        string
-	passwordName         string
+	passwordFieldName    string
 	whiteIPListFieldName string
 	lockedFieldName      string
 	lockedTimeExpires    time.Duration
 	lockedTimeLayout     string
 }
 
-func createDbUserHandler(params interface{}) (UserHandler, error) {
-	config, ok := params.(*DbConfig)
+func createDbUserHandler(config *Config) (UserHandler, error) {
+	userConfig, ok := config.UserConfig.(*DbConfig)
 	if !ok {
 		return nil, errors.New("arguments of UserConfig isn't DbConfig")
 	}
 
-	db, err := sql.Open(config.URL())
+	db, err := sql.Open(userConfig.DbType, userConfig.DbURL)
 	if err != nil {
 		return nil, err
 	}
 
-	lockSQL := ""
+	verify, err := readVerify(config)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	var externalVerify VerifyFunc
+	params, ok := config.AuthConfig.(map[string]interface{})
+	if ok && params != nil {
+		o := params["external.verify.callback"]
+		if vf, ok := o.(VerifyFunc); ok {
+			externalVerify = vf
+		}
+	}
+
 	querySQL := "SELECT * FROM users WHERE username = ?"
+	lockSQL := ""
 	unlockSQL := ""
 	lockedSQL := ""
 
 	userFieldName := "username"
-	passwordName := "password"
+	passwordFieldName := "password"
 	lockedFieldName := "locked_at"
 
 	lockedTimeExpires := time.Duration(0)
 	lockedTimeLayout := ""
 	whiteIPListFieldName := "white_addresses"
 
-	if config.Params != nil {
-		if o, ok := config.Params["username"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 username 的值不是字符串")
-			}
-			if s = strings.TrimSpace(s); s != "" {
-				userFieldName = s
-			}
+	if userConfig.Params != nil {
+		if s, ok := stringWith(userConfig.Params, "username", ""); !ok {
+			return nil, errors.New("数据库配置中的 username 的值不是字符串")
+		} else if s != "" {
+			userFieldName = s
 		}
 
-		if o, ok := config.Params["password"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 password 的值不是字符串")
-			}
-			if s = strings.TrimSpace(s); s != "" {
-				passwordName = s
-			}
+		if s, ok := stringWith(userConfig.Params, "password", ""); !ok {
+			db.Close()
+			return nil, errors.New("数据库配置中的 password 的值不是字符串")
+		} else if s != "" {
+			passwordFieldName = s
 		}
 
-		if o, ok := config.Params["white_address_list"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 white_address_list 的值不是字符串")
-			}
-			if s = strings.TrimSpace(s); s != "" {
-				whiteIPListFieldName = s
-			}
+		if s, ok := stringWith(userConfig.Params, "white_address_list", ""); !ok {
+			db.Close()
+			return nil, errors.New("数据库配置中的 white_address_list 的值不是字符串")
+		} else if s != "" {
+			whiteIPListFieldName = s
 		}
 
-		if o, ok := config.Params["locked_at"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 locked_at 的值不是字符串")
-			}
-			if s = strings.TrimSpace(s); s != "" {
-				lockedFieldName = s
+		if s, ok := stringWith(userConfig.Params, "locked_at", ""); !ok {
+			db.Close()
+			return nil, errors.New("数据库配置中的 locked_at 的值不是字符串")
+		} else if s != "" {
+			lockedFieldName = s
 
-				if o, ok := config.Params["locked_format"]; ok && o != nil {
-					s, ok := o.(string)
-					if !ok {
-						return nil, errors.New("数据库配置中的 locked_format 的值不是字符串")
-					}
-					if strings.TrimSpace(s) != "" {
-						lockedTimeLayout = s
-					}
+			if s, ok := stringWith(userConfig.Params, "locked_format", ""); !ok {
+				db.Close()
+				return nil, errors.New("数据库配置中的 locked_format 的值不是字符串")
+			} else if s != "" {
+				lockedTimeLayout = s
+			}
+
+			if s, ok := stringWith(userConfig.Params, "locked_time_expires", ""); !ok {
+				db.Close()
+				return nil, errors.New("数据库配置中的 locked_time_expires 的值不是字符串")
+			} else if s != "" {
+				duration, err := time.ParseDuration(s)
+				if err != nil {
+					return nil, errors.New("数据库配置中的 locked_time_expires 的值不是有效的时间间隔")
 				}
-
-				if o, ok := config.Params["locked_time_expires"]; ok && o != nil {
-					s, ok := o.(string)
-					if !ok {
-						return nil, errors.New("数据库配置中的 locked_time_expires 的值不是字符串")
-					}
-					if s = strings.TrimSpace(s); s != "" {
-						duration, err := time.ParseDuration(s)
-						if err != nil {
-							return nil, errors.New("数据库配置中的 locked_time_expires 的值不是有效的时间间隔")
-						}
-						lockedTimeExpires = duration
-					}
-				}
+				lockedTimeExpires = duration
 			}
 		}
 
-		if o, ok := config.Params["querySQL"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 querySQL 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "" {
-				querySQL = s
-			}
+		if s, ok := stringWith(userConfig.Params, "querySQL", ""); !ok {
+			db.Close()
+			return nil, errors.New("数据库配置中的 querySQL 的值不是字符串")
+		} else if s != "" {
+			querySQL = s
 		}
 
-		if o, ok := config.Params["lockSQL"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 lockSQL 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "" {
-				lockSQL = s
-			}
+		if s, ok := stringWith(userConfig.Params, "lockSQL", ""); !ok {
+			db.Close()
+			return nil, errors.New("数据库配置中的 lockSQL 的值不是字符串")
+		} else if s != "" {
+			lockSQL = s
 		}
 
-		if o, ok := config.Params["unlockSQL"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 unlockSQL 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "" {
-				unlockSQL = s
-			}
+		if s, ok := stringWith(userConfig.Params, "unlockSQL", ""); !ok {
+			db.Close()
+			return nil, errors.New("数据库配置中的 unlockSQL 的值不是字符串")
+		} else if s != "" {
+			unlockSQL = s
 		}
 
-		if o, ok := config.Params["lockedSQL"]; ok && o != nil {
-			s, ok := o.(string)
-			if !ok {
-				return nil, errors.New("数据库配置中的 lockedSQL 的值不是字符串")
-			}
-			if strings.TrimSpace(s) != "" {
-				lockedSQL = s
-			}
+		if s, ok := stringWith(userConfig.Params, "lockedSQL", ""); !ok {
+			db.Close()
+			return nil, errors.New("数据库配置中的 lockedSQL 的值不是字符串")
+		} else if s != "" {
+			lockedSQL = s
 		}
 	}
 
-	if config.DbType == "postgres" || config.DbType == "postgresql" {
+	if userConfig.DbType == "postgres" || userConfig.DbType == "postgresql" {
 		querySQL = ReplacePlaceholders(querySQL)
 		lockSQL = ReplacePlaceholders(lockSQL)
 		unlockSQL = ReplacePlaceholders(unlockSQL)
@@ -326,13 +163,15 @@ func createDbUserHandler(params interface{}) (UserHandler, error) {
 
 	return &dbUserHandler{
 		db:                   db,
+		externalVerify:       externalVerify,
+		verify:               verify,
 		querySQL:             querySQL,
 		lockSQL:              lockSQL,
 		unlockSQL:            unlockSQL,
 		lockedSQL:            lockedSQL,
 		whiteIPListFieldName: whiteIPListFieldName,
 		userFieldName:        userFieldName,
-		passwordName:         passwordName,
+		passwordFieldName:    passwordFieldName,
 		lockedFieldName:      lockedFieldName,
 		lockedTimeExpires:    lockedTimeExpires,
 		lockedTimeLayout:     lockedTimeLayout,
@@ -372,12 +211,14 @@ func (ah *dbUserHandler) parseTime(o interface{}) (time.Time, error) {
 
 func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User, error) {
 	var password string
-	if o := data[ah.passwordName]; o != nil {
-		s, ok := o.(string)
-		if !ok {
-			return nil, fmt.Errorf("value of '"+ah.passwordName+"' isn't string - %T", o)
+	if ah.passwordFieldName != "" {
+		if o := data[ah.passwordFieldName]; o != nil {
+			s, ok := o.(string)
+			if !ok {
+				return nil, fmt.Errorf("value of '"+ah.passwordFieldName+"' isn't string - %T", o)
+			}
+			password = s
 		}
-		password = s
 	}
 
 	var lockedAt time.Time
@@ -436,6 +277,8 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 	}
 
 	return &UserImpl{
+		externalVerify:    ah.externalVerify,
+		verify:            ah.verify,
 		name:              user,
 		password:          password,
 		lockedAt:          lockedAt,
@@ -445,7 +288,7 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 	}, nil
 }
 
-func (ah *dbUserHandler) Read(username, address string) ([]User, error) {
+func (ah *dbUserHandler) Read(username string) (User, error) {
 	rows, err := ah.db.Query(ah.querySQL, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -484,7 +327,7 @@ func (ah *dbUserHandler) Read(username, address string) ([]User, error) {
 		}
 
 		// 从 data 中删除密码，确保它不会传给客户端
-		delete(user, ah.passwordName)
+		delete(user, ah.passwordFieldName)
 		users = append(users, u)
 	}
 	if rows.Err() != nil {
@@ -492,7 +335,15 @@ func (ah *dbUserHandler) Read(username, address string) ([]User, error) {
 			return nil, err
 		}
 	}
-	return users, nil
+
+	if len(users) == 0 {
+		return nil, nil
+	}
+
+	if len(users) != 1 {
+		return nil, ErrMutiUsers
+	}
+	return users[0], nil
 }
 
 func (ah *dbUserHandler) Locked() ([]LockedUser, error) {
@@ -596,6 +447,7 @@ func parseTime(layout, s string) time.Time {
 	return time.Time{}
 }
 
+// ReplacePlaceholders 将 sql 语句中的 ? 改成 $x 形式
 func ReplacePlaceholders(sql string) string {
 	buf := &bytes.Buffer{}
 	i := 0

@@ -25,11 +25,7 @@ import (
 )
 
 var dbType = flag.String("db.type", "postgres", "")
-var dbHost = flag.String("db.host", "127.0.0.1", "")
-var dbPort = flag.String("db.port", "5432", "")
-var dbSchema = flag.String("db.schema", "tpt_models_test", "")
-var dbUsername = flag.String("db.username", "tpt", "")
-var dbPassword = flag.String("db.password", "extreme", "")
+var dbURL = flag.String("db.url", "host=127.0.0.1 port=5432 dbname=tpt_models_test user=tpt password=extreme sslmode=disable", "")
 
 type serverTest struct {
 	srv    *Server
@@ -47,12 +43,8 @@ func (srv *serverTest) Close() error {
 func MakeTestConfig() *Config {
 	config := &Config{
 		UserConfig: &DbConfig{
-			DbType:   *dbType,
-			Address:  *dbHost,
-			Port:     *dbPort,
-			DbName:   *dbSchema,
-			Username: *dbUsername,
-			Password: *dbPassword},
+			DbType: *dbType,
+			DbURL:  *dbURL},
 		TicketProtocol: "jwt",
 		//TicketConfig:   map[string]interface{}{},
 	}
@@ -82,8 +74,8 @@ func makeMD5(signingString string) string {
 }
 
 func startTest(t *testing.T, table string, config *Config) *serverTest {
-	dbDrv, dbURL := config.UserConfig.(*DbConfig).URL()
-	db, err := sql.Open(dbDrv, dbURL)
+	db, err := sql.Open(config.UserConfig.(*DbConfig).DbType,
+		config.UserConfig.(*DbConfig).DbURL)
 	if err != nil {
 		t.Error(err)
 		t.FailNow()
@@ -145,7 +137,8 @@ insert into ` + table + `(username, password, email, location) values('zhu', '` 
 		t.FailNow()
 	}
 
-	conn, err := sql.Open(dbDrv, dbURL)
+	conn, err := sql.Open(config.UserConfig.(*DbConfig).DbType,
+		config.UserConfig.(*DbConfig).DbURL)
 	if err != nil {
 		t.Error(err)
 		t.FailNow()

@@ -146,7 +146,7 @@ func createDbOnline(params interface{}) (Online, error) {
 		return nil, errors.New("arguments of UserConfig isn't DbConfig")
 	}
 
-	db, err := sql.Open(config.URL())
+	db, err := sql.Open(config.DbType, config.DbURL)
 	if err != nil {
 		return nil, err
 	}
@@ -161,43 +161,43 @@ func createDbOnline(params interface{}) (Online, error) {
 	withAddress := false
 
 	if config.Params != nil {
-		if s, ok := stringWith(config.Params, "online.query"); !ok {
+		if s, ok := stringWith(config.Params, "online.query", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.query 的值不是字符串")
 		} else if s != "" {
 			querySQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.queryUser"); !ok {
+		if s, ok := stringWith(config.Params, "online.queryUser", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.queryUser 的值不是字符串")
 		} else if s != "" {
 			queryUserIDSQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.count"); !ok {
+		if s, ok := stringWith(config.Params, "online.count", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.count 的值不是字符串")
 		} else if s != "" {
 			countSQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.insert"); !ok {
+		if s, ok := stringWith(config.Params, "online.insert", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.insert 的值不是字符串")
 		} else if s != "" {
 			insertSQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.update"); !ok {
+		if s, ok := stringWith(config.Params, "online.update", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.update 的值不是字符串")
 		} else if s != "" {
 			updateSQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.delete"); !ok {
+		if s, ok := stringWith(config.Params, "online.delete", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.delete 的值不是字符串")
 		} else if s != "" {
 			deleteSQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.withAddress"); !ok {
+		if s, ok := stringWith(config.Params, "online.withAddress", "false"); !ok {
 			return nil, errors.New("数据库配置中的 online.withAddress 的值不是字符串")
 		} else if s == "true" {
 			withAddress = true
@@ -269,15 +269,19 @@ func (nt NullTime) Value() (driver.Value, error) {
 	return nt.Time, nil
 }
 
-func stringWith(params map[string]interface{}, key string) (string, bool) {
+func stringWith(params map[string]interface{}, key, defaultValue string) (string, bool) {
 	o, ok := params[key]
 	if !ok || o == nil {
-		return "", true
+		return defaultValue, true
 	}
 
 	s, ok := o.(string)
 	if !ok {
 		return "", false
 	}
-	return strings.TrimSpace(s), true
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return defaultValue, true
+	}
+	return s, true
 }

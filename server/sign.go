@@ -1,7 +1,13 @@
 package server
 
-import jwt "github.com/dgrijalva/jwt-go"
+import (
+	"errors"
+	"strings"
 
+	jwt "github.com/dgrijalva/jwt-go"
+)
+
+// ErrSignatureInvalid Specific instances for HS256 and company
 var ErrSignatureInvalid = jwt.ErrSignatureInvalid
 
 // SigningMethod Implement SigningMethod to add new methods for signing or verifying tokens.
@@ -52,4 +58,40 @@ func (m *signingMethodDefault) Verify(signingString, signature string, key inter
 // Only allow 'none' signing if UnsafeAllowNoneSignatureType is specified as the key
 func (m *signingMethodDefault) Sign(signingString string, key interface{}) (string, error) {
 	return signingString, nil
+}
+
+func readVerify(config *Config) (func(string, string) error, error) {
+	var signingMethod SigningMethod = methodDefault
+	var secretKey []byte
+
+	params, ok := config.AuthConfig.(map[string]interface{})
+	if ok && params != nil {
+		if o, ok := params["passwordHashAlg"]; ok && o != nil {
+			s, ok := o.(string)
+			if !ok {
+				return nil, errors.New("数据库配置中的 passwordHashAlg 的值不是字符串")
+			}
+
+			var hashKey string
+			if k, ok := params["passwordHashKey"]; ok && k != nil {
+				s, ok := k.(string)
+				if !ok {
+					return nil, errors.New("数据库配置中的 passwordHashKey 的值不是字符串")
+				}
+				hashKey = strings.TrimSpace(s)
+			}
+
+			signingMethod = GetSigningMethod(s)
+			if signingMethod == nil {
+				return nil, errors.New("在数据库配置中的 passwordHashAlg 的算法不支持")
+			}
+			if hashKey != "" {
+				secretKey = []byte(hashKey)
+			}
+		}
+	}
+
+	return func(password, excepted string) error {
+		return signingMethod.Verify(password, excepted, secretKey)
+	}, nil
 }
