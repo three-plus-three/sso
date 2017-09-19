@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// LockedUser 被锁定的用户
 type LockedUser struct {
 	Name     string
 	LockedAt time.Time
@@ -55,15 +56,6 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 	if err != nil {
 		db.Close()
 		return nil, err
-	}
-
-	var externalVerify VerifyFunc
-	params, ok := config.AuthConfig.(map[string]interface{})
-	if ok && params != nil {
-		o := params["external.verify.callback"]
-		if vf, ok := o.(VerifyFunc); ok {
-			externalVerify = vf
-		}
 	}
 
 	querySQL := "SELECT * FROM users WHERE username = ?"
@@ -163,7 +155,7 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 
 	return &dbUserHandler{
 		db:                   db,
-		externalVerify:       externalVerify,
+		externalVerify:       config.ExternalVerify,
 		verify:               verify,
 		querySQL:             querySQL,
 		lockSQL:              lockSQL,

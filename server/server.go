@@ -92,7 +92,9 @@ type Config struct {
 
 	ListenAt       string
 	UserConfig     interface{}
+	UserNotFound   UserNotFound
 	AuthConfig     interface{}
+	ExternalVerify VerifyFunc
 	TicketLookup   string
 	TicketProtocol string
 	TicketConfig   map[string]interface{}
@@ -205,6 +207,7 @@ func CreateServer(config *Config) (*Server, error) {
 		welcomeURL:        config.WelcomeURL,
 		online:            online,
 		userHandler:       userHandler,
+		userNotFound:      config.UserNotFound,
 		tokenName:         tokenName,
 		maxLoginFailCount: config.MaxLoginFailCount,
 		ticketGetter:      ticketGetter,
