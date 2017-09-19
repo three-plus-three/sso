@@ -56,6 +56,9 @@ var (
 
 	// ErrUserAlreadyOnline 用户已登录
 	ErrUserAlreadyOnline = echo.NewHTTPError(http.StatusUnauthorized, "user is already online")
+
+	// ErrPermissionDenied 没有权限
+	ErrPermissionDenied = echo.NewHTTPError(http.StatusUnauthorized, "permission is denied")
 )
 
 // TicketGetter 从请求中获取票据
@@ -604,7 +607,10 @@ func (srv *Server) login(c echo.Context) error {
 				return srv.relogin(c, user, "用户不能在该地址访问", err)
 			} else if err == ErrUserLocked {
 				return srv.relogin(c, user, "错误次数大多，帐号被锁定！", err)
+			} else if err == ErrPermissionDenied {
+				return srv.relogin(c, user, "用户没有访问权限", err)
 			}
+
 			return srv.relogin(c, user, "", nil)
 		}
 
