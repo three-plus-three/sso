@@ -64,9 +64,10 @@ var (
 // TicketGetter 从请求中获取票据
 type TicketGetter func(c echo.Context) string
 
+// Config 服务的配置项
 type Config struct {
 	Theme           string
-	UrlPrefix       string
+	URLPrefix       string
 	PlayPath        string
 	HeaderTitleText string
 	FooterTitleText string
@@ -76,7 +77,7 @@ type Config struct {
 	CookieDomain   string
 	CookiePath     string
 	CookieSecure   bool
-	CookieHttpOnly bool
+	CookieHTTPOnly bool
 
 	MaxLoginFailCount int
 	WelcomeURL        string
@@ -91,6 +92,7 @@ type Config struct {
 	TicketConfig   map[string]interface{}
 }
 
+// DbConfig 服务的数据库配置项
 type DbConfig struct {
 	DbType   string
 	Address  string
@@ -123,8 +125,8 @@ func (db *DbConfig) URL() (string, string) {
 
 // CreateServer 创建一个 sso 服务
 func CreateServer(config *Config) (*Server, error) {
-	if strings.HasSuffix(config.UrlPrefix, "/") {
-		config.UrlPrefix = strings.TrimSuffix(config.UrlPrefix, "/")
+	if strings.HasSuffix(config.URLPrefix, "/") {
+		config.URLPrefix = strings.TrimSuffix(config.URLPrefix, "/")
 	}
 	if config.CookiePath == "" {
 		config.CookiePath = "/"
@@ -193,9 +195,9 @@ func CreateServer(config *Config) (*Server, error) {
 	}
 
 	variables := map[string]interface{}{}
-	variables["url_prefix"] = config.UrlPrefix
+	variables["url_prefix"] = config.URLPrefix
 	variables["play_path"] = config.PlayPath
-	variables["application_context"] = config.UrlPrefix
+	variables["application_context"] = config.URLPrefix
 	variables["header_title_text"] = config.HeaderTitleText
 	variables["footer_title_text"] = config.FooterTitleText
 	variables["logo_png"] = config.LogoPath
@@ -217,9 +219,9 @@ func CreateServer(config *Config) (*Server, error) {
 		cookieDomain:      config.CookieDomain,
 		cookiePath:        config.CookiePath,
 		cookieSecure:      config.CookieSecure,
-		cookieHttpOnly:    config.CookieHttpOnly,
+		cookieHTTPOnly:    config.CookieHTTPOnly,
 		theme:             config.Theme,
-		urlPrefix:         config.UrlPrefix,
+		urlPrefix:         config.URLPrefix,
 		welcomeURL:        config.WelcomeURL,
 		online:            online,
 		userHandler:       userHandler,
@@ -261,7 +263,7 @@ func CreateServer(config *Config) (*Server, error) {
 	}
 
 	fs := http.FileServer(templateBox.HTTPBox())
-	assetHandler := http.StripPrefix(config.UrlPrefix+"/static/",
+	assetHandler := http.StripPrefix(config.URLPrefix+"/static/",
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			upath := r.URL.Path
 			if strings.HasPrefix(upath, "/") {
@@ -278,18 +280,18 @@ func CreateServer(config *Config) (*Server, error) {
 			fs.ServeHTTP(w, r)
 		}))
 
-	srv.engine.GET(config.UrlPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.UrlPrefix, http.DefaultServeMux)))
-	srv.engine.GET(config.UrlPrefix+"/static/*", echo.WrapHandler(assetHandler))
-	srv.engine.GET(config.UrlPrefix+"/login", srv.loginGet)
-	srv.engine.POST(config.UrlPrefix+"/login", srv.login)
-	srv.engine.POST(config.UrlPrefix+"/logout", srv.logout)
-	srv.engine.GET(config.UrlPrefix+"/logout", srv.logout)
+	srv.engine.GET(config.URLPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.URLPrefix, http.DefaultServeMux)))
+	srv.engine.GET(config.URLPrefix+"/static/*", echo.WrapHandler(assetHandler))
+	srv.engine.GET(config.URLPrefix+"/login", srv.loginGet)
+	srv.engine.POST(config.URLPrefix+"/login", srv.login)
+	srv.engine.POST(config.URLPrefix+"/logout", srv.logout)
+	srv.engine.GET(config.URLPrefix+"/logout", srv.logout)
 	//srv.engine.GET("/auth", srv.getTicket)
-	srv.engine.GET(config.UrlPrefix+"/verify", srv.verifyTicket)
+	srv.engine.GET(config.URLPrefix+"/verify", srv.verifyTicket)
 	//srv.engine.POST("/verify", srv.verifyTickets)
 
-	srv.engine.GET(config.UrlPrefix+"/locked_users", srv.lockedUsers)
-	srv.engine.GET(config.UrlPrefix+"/unlock_user", srv.userUnlock)
+	srv.engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
+	srv.engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
 
 	return srv, nil
 }
@@ -301,7 +303,7 @@ type Server struct {
 	cookieDomain          string
 	cookiePath            string
 	cookieSecure          bool
-	cookieHttpOnly        bool
+	cookieHTTPOnly        bool
 	urlPrefix             string
 	welcomeURL            string
 	tokenName             string
