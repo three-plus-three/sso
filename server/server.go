@@ -618,7 +618,7 @@ func (srv *Server) login(c echo.Context) error {
 		}
 
 		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, "", nil)
+			return srv.relogin(c, user, "", err)
 		}
 
 		// 不要将过多的信息暴露给用户，仅将特定的信息返回
