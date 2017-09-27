@@ -61,6 +61,19 @@ var (
 	ErrPermissionDenied = echo.NewHTTPError(http.StatusUnauthorized, "permission is denied")
 )
 
+type ErrExternalServer struct {
+	Msg string
+}
+
+func (e *ErrExternalServer) Error() string {
+	return e.Msg
+}
+
+func IsErrExternalServer(e error) bool {
+	_, ok := e.(*ErrExternalServer)
+	return ok
+}
+
 // TicketGetter 从请求中获取票据
 type TicketGetter func(c echo.Context) string
 
@@ -510,6 +523,8 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 		message = "错误次数大多，帐号被锁定！"
 	} else if err == ErrPermissionDenied {
 		message = "用户没有访问权限"
+	} else if IsErrExternalServer(err) {
+		message = err.Error()
 	} else {
 		if message == "" {
 			message = "用户名或密码不正确!"
@@ -631,6 +646,9 @@ func (srv *Server) login(c echo.Context) error {
 			if err == excepted {
 				return err
 			}
+		}
+		if IsErrExternalServer(err) {
+			return err
 		}
 		return echo.ErrUnauthorized
 	}
