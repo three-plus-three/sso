@@ -3,6 +3,7 @@ package revel_sso
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -43,8 +44,10 @@ func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Requ
 
 			ticket, err := ssoClient.ValidateTicket(serviceTicket, currentURL.String())
 			if err != nil {
+				err = errors.New("验证 ticket 失败，" + err.Error())
+				log.Println(err)
 				c.Response.Status = http.StatusUnauthorized
-				return c.RenderError(errors.New("验证 ticket 失败，" + err.Error()))
+				return c.RenderError(err)
 			}
 
 			c.Session[sso.SESSION_VALID_KEY] = "true"
@@ -52,7 +55,6 @@ func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Requ
 				c.Session[sso.SESSION_USER_KEY] = fmt.Sprint(user)
 			}
 		}
-
 		return nil
 	}
 }

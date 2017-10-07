@@ -3428,7 +3428,12 @@
                     {{- if .errorMessage}}
                     <div class="help text-danger">{{ .errorMessage }}</div>
                     {{- end}}
+                    {{if .global.new_user_url}}
+                    <input type=submit class="btn btn-primary" value="登录" />
+                    <a href='{{.global.new_user_url}}' class="btn btn-primary">注册</a>
+                    {{else}}
                     <input type=submit class="btn btn-primary btn-lg btn-block" value="登录" />
+                    {{end}}
                 </form>
 
             </div>

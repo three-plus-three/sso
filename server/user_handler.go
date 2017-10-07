@@ -322,7 +322,8 @@ func (ah *dbUserHandler) Read(username string) (User, error) {
 		delete(user, ah.passwordFieldName)
 		users = append(users, u)
 	}
-	if rows.Err() != nil {
+
+	if err = rows.Err(); err != nil {
 		if err != sql.ErrNoRows {
 			return nil, err
 		}

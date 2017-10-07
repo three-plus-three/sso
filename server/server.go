@@ -99,6 +99,7 @@ type Config struct {
 	CookieHTTPOnly bool
 
 	MaxLoginFailCount int
+	NewUserURL        string
 	WelcomeURL        string
 	RedirectMode      string
 	CookiesForLogout  []*http.Cookie
@@ -196,6 +197,7 @@ func CreateServer(config *Config) (*Server, error) {
 	variables["header_title_text"] = config.HeaderTitleText
 	variables["footer_title_text"] = config.FooterTitleText
 	variables["logo_png"] = config.LogoPath
+	variables["new_user_url"] = config.NewUserURL
 
 	// Echo instance
 	e := echo.New()
