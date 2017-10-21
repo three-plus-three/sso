@@ -117,21 +117,24 @@ func GetValuesFromCookie(req *http.Request, sessionKey string, verify func(data,
 		}
 		return nil, err
 	}
+	return GetValuesFromStrng(cookie.Value, verify)
+}
 
-	if cookie.Value == "" {
+func GetValuesFromStrng(value string, verify func(data, sig string) bool) (url.Values, error) {
+	if value == "" {
 		return nil, errors.New("session cookie is empty")
 	}
 
 	// Separate the data from the signature.
-	hyphen := strings.Index(cookie.Value, "-")
-	if hyphen == -1 || hyphen >= len(cookie.Value)-1 {
+	hyphen := strings.Index(value, "-")
+	if hyphen == -1 || hyphen >= len(value)-1 {
 		return nil, errors.New("session cookie has invalid value")
 	}
-	data := cookie.Value[hyphen+1:]
+	data := value[hyphen+1:]
 
 	// Verify the signature.
 	if verify != nil {
-		if !verify(data, cookie.Value[:hyphen]) {
+		if !verify(data, value[:hyphen]) {
 			return nil, errors.New("session cookie signature failed")
 		}
 	}
@@ -141,9 +144,9 @@ func GetValuesFromCookie(req *http.Request, sessionKey string, verify func(data,
 		return nil, errors.New("session cookie decode fail, " + e.Error())
 	}
 
-	// if sessionIsInvalid(values) {
-	//  return nil, errors.New("session is invalid")
-	// }
+	if IsInvalid(values) {
+		return nil, errors.New("session is invalid")
+	}
 
 	if TimeoutExpiredOrMissing(values) {
 		return nil, errors.New("session is timeout")
