@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"database/sql"
 	"encoding/json"
@@ -230,7 +231,22 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 		}
 		var ipList []string
 		if err := json.Unmarshal([]byte(s), &ipList); err != nil {
-			return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't []string - %s", o)
+			scanner := bufio.NewScanner(strings.NewReader(s))
+			for scanner.Scan() {
+				bs := scanner.Bytes()
+				if len(bs) == 0 {
+					continue
+				}
+				bs = bytes.TrimSpace(bs)
+				if len(bs) == 0 {
+					continue
+				}
+
+				ipList = append(ipList, string(bs))
+			}
+			if err := scanner.Err(); err != nil {
+				return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't []string - %s", o)
+			}
 		}
 
 		for _, s := range ipList {
