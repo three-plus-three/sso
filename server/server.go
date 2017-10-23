@@ -691,6 +691,18 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 			queryParams.Set("username", ticket.Username)
 			if o := ticket.Data["is_new"]; o != nil {
 				queryParams.Set("is_new", fmt.Sprint(o))
+				if o := ticket.Data["roles"]; o != nil {
+					switch vv := o.(type) {
+					case []string:
+						queryParams["roles"] = vv
+					case []interface{}:
+						ss := make([]string, 0, len(vv))
+						for _, v := range vv {
+							ss = append(ss, fmt.Sprint(v))
+						}
+						queryParams["roles"] = ss
+					}
+				}
 			}
 			u.RawQuery = queryParams.Encode()
 			returnURL = u.String()
