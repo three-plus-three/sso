@@ -688,6 +688,7 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 		if err == nil {
 			queryParams := u.Query()
 			queryParams.Set("ticket", serviceTicket)
+			queryParams.Set("username", ticket.Username)
 			if o := ticket.Data["is_new"]; o != nil {
 				queryParams.Set("is_new", fmt.Sprint(o))
 			}
