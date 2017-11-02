@@ -119,9 +119,11 @@ func (u *UserImpl) Auth(address, password string) error {
 		return errors.New("user is inused")
 	}
 
-	if typ := u.data["source"]; typ != nil {
-		if verifyType := fmt.Sprint(typ); verifyType != "" && verifyType != "builin" {
-			return u.externalVerify(verifyType, u.name, password)
+	if u.externalVerify != nil {
+		if typ := u.data["source"]; typ != nil {
+			if verifyType := fmt.Sprint(typ); verifyType != "" && verifyType != "builin" {
+				return u.externalVerify(verifyType, u.name, password)
+			}
 		}
 	}
 
