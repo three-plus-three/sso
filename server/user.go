@@ -1,24 +1,19 @@
 package server
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/three-plus-three/modules/netutil"
 )
 
 var localAddressList, _ = net.LookupHost("localhost")
 
 // DefaultUserHandler 缺省 UserHandler
 var DefaultUserHandler = createDbUserHandler
-
-type IPChecker interface {
-	Contains(net.IP) bool
-}
-
-var _ IPChecker = &net.IPNet{}
 
 type User interface {
 	Name() string
@@ -33,7 +28,7 @@ type UserImpl struct {
 	password          string
 	lockedAt          time.Time
 	lockedTimeExpires time.Duration
-	ingressIPList     []IPChecker
+	ingressIPList     []netutil.IPChecker
 	data              map[string]interface{}
 }
 
@@ -140,49 +135,4 @@ func (u *UserImpl) Auth(address, password string) error {
 		return err
 	}
 	return nil
-}
-
-type ipRange struct {
-	start, end uint32
-}
-
-func (r *ipRange) String() string {
-	var a, b [4]byte
-	binary.BigEndian.PutUint32(a[:], r.start)
-	binary.BigEndian.PutUint32(b[:], r.end)
-	return net.IP(a[:]).String() + "-" +
-		net.IP(b[:]).String()
-}
-
-func (r *ipRange) Contains(ip net.IP) bool {
-	if ip.To4() == nil {
-		return false
-	}
-
-	v := binary.BigEndian.Uint32(ip.To4())
-	return r.start <= v && v <= r.end
-}
-
-func IPRange(start, end net.IP) (IPChecker, error) {
-	if start.To4() == nil {
-		return nil, errors.New("ip range 不支持 IPv6")
-	}
-	if end.To4() == nil {
-		return nil, errors.New("ip range 不支持 IPv6")
-	}
-	s := binary.BigEndian.Uint32(start.To4())
-	e := binary.BigEndian.Uint32(end.To4())
-	return &ipRange{start: s, end: e}, nil
-}
-
-func IPRangeWith(start, end string) (IPChecker, error) {
-	s := net.ParseIP(start)
-	if s == nil {
-		return nil, errors.New(start + " is invalid address")
-	}
-	e := net.ParseIP(end)
-	if e == nil {
-		return nil, errors.New(end + " is invalid address")
-	}
-	return IPRange(s, e)
 }

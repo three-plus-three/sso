@@ -7,9 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 	"time"
+
+	"github.com/three-plus-three/modules/netutil"
 )
 
 // LockedUser 被锁定的用户
@@ -223,7 +224,7 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 		}
 	}
 
-	var ingressIPList []IPChecker
+	var ingressIPList []netutil.IPChecker
 	if o := data[ah.whiteIPListFieldName]; o != nil {
 		s, ok := o.(string)
 		if !ok {
@@ -249,38 +250,10 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 			}
 		}
 
-		for _, s := range ipList {
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
-			}
-			if strings.Contains(s, "-") {
-				ss := strings.Split(s, "-")
-				if len(ss) != 2 {
-					return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't invalid ip range - %s", s)
-				}
-				checker, err := IPRangeWith(ss[0], ss[1])
-				if err != nil {
-					return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't invalid ip range - %s", s)
-				}
-				ingressIPList = append(ingressIPList, checker)
-				continue
-			}
-
-			if strings.Contains(s, "/") {
-				_, cidr, err := net.ParseCIDR(s)
-				if err != nil {
-					return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't invalid ip range - %s", s)
-				}
-				ingressIPList = append(ingressIPList, cidr)
-				continue
-			}
-
-			checker, err := IPRangeWith(s, s)
-			if err != nil {
-				return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't invalid ip range - %s", s)
-			}
-			ingressIPList = append(ingressIPList, checker)
+		var err error
+		ingressIPList, err = netutil.ToCheckers(ipList)
+		if err != nil {
+			return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't invalid ip range - %s", s)
 		}
 	}
 
