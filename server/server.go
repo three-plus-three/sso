@@ -232,6 +232,7 @@ func CreateServer(config *Config) (*Server, error) {
 			tickets: map[string]*authenticatingTicket{},
 		},
 		failCounter: createFailCounter(),
+		logger:      log.New(os.Stderr, "[sso] ", log.LstdFlags|log.Lshortfile),
 		redirect: func(c echo.Context, toURL string) error {
 			return c.Redirect(http.StatusTemporaryRedirect, toURL)
 		},
@@ -312,6 +313,7 @@ type Server struct {
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
 	failCounter           FailCounter
+	logger                *log.Logger
 
 	redirect func(c echo.Context, url string) error
 	data     map[string]interface{}
@@ -339,7 +341,7 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 		if theme != "" {
 			t, err = r.loadTemplate("login_" + theme + ".html")
 			if err != nil {
-				log.Println("[warn] load login_"+theme+".html", err)
+				r.srv.logger.Println("[warn] load login_"+theme+".html", err)
 			}
 		}
 	}
@@ -370,15 +372,15 @@ func (r *renderer) loadTemplate(name string) (*template.Template, error) {
 		if err == nil {
 			t, err = template.New(name).Funcs(funcs).Parse(string(bs))
 			if err != nil {
-				log.Println("failed to load template(", name, ") from ", filename, ", ", err)
+				r.srv.logger.Println("failed to load template(", name, ") from ", filename, ", ", err)
 				return nil, err
 			}
-			log.Println("load template(", name, ") from ", filename)
+			r.srv.logger.Println("load template(", name, ") from ", filename)
 			break
 		}
 
 		if !os.IsNotExist(err) {
-			log.Println("failed to load template(", name, ") from ", filename, ", ", err)
+			r.srv.logger.Println("failed to load template(", name, ") from ", filename, ", ", err)
 			return nil, err
 		}
 	}
@@ -386,17 +388,17 @@ func (r *renderer) loadTemplate(name string) (*template.Template, error) {
 	if t == nil {
 		bs, err := r.templateBox.Bytes(name)
 		if err != nil {
-			log.Println("failed to load template(", name, ") from rice box, ", err)
+			r.srv.logger.Println("failed to load template(", name, ") from rice box, ", err)
 			return nil, err
 		}
 		if len(bs) == 0 {
-			log.Println("failed to load template(", name, ") from rice box, file is empty.")
+			r.srv.logger.Println("failed to load template(", name, ") from rice box, file is empty.")
 			return nil, err
 		}
 
 		t, err = template.New(name).Funcs(funcs).Parse(string(bs))
 		if err != nil {
-			log.Println("failed to load template(", name, ") from rice box, ", err)
+			r.srv.logger.Println("failed to load template(", name, ") from rice box, ", err)
 			return nil, err
 		}
 	}
@@ -570,7 +572,7 @@ func (srv *Server) lockUserIfNeed(c echo.Context, user userLogin) {
 	var failCount = srv.failCounter.Count(user.Username)
 	if failCount > srv.maxLoginFailCount {
 		if err := srv.userHandler.Lock(user.Username); err != nil {
-			log.Println("lock", user.Username, "fail,", err)
+			srv.logger.Println("lock", user.Username, "fail,", err)
 		}
 	}
 }
@@ -578,7 +580,7 @@ func (srv *Server) lockUserIfNeed(c echo.Context, user userLogin) {
 func (srv *Server) login(c echo.Context) error {
 	var user userLogin
 	if err := c.Bind(&user); err != nil {
-		log.Println("登录数据的格式不正确 -", err)
+		srv.logger.Println("登录数据的格式不正确 -", err)
 
 		if !isConsumeJSON(c) {
 			data := map[string]interface{}{"global": srv.data,
@@ -627,7 +629,7 @@ func (srv *Server) login(c echo.Context) error {
 	}
 
 	if err != nil {
-		log.Println("用户授权失败 -", err)
+		srv.logger.Println("用户授权失败 -", err)
 
 		// auth == nil 是说明不是用户，不必计数
 		if auth != nil && err == ErrPasswordNotMatch && "admin" != user.Username {
@@ -658,7 +660,7 @@ func (srv *Server) login(c echo.Context) error {
 
 	ticket, err := srv.tickets.NewTicket(user.Username, userData)
 	if err != nil {
-		log.Println("内部生成 ticket 失败 -", err)
+		srv.logger.Println("内部生成 ticket 失败 -", err)
 
 		if !isConsumeJSON(c) {
 			return srv.relogin(c, user, "", err)
@@ -672,7 +674,7 @@ func (srv *Server) login(c echo.Context) error {
 func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
 	err := srv.online.Save(ticket.Username, c.RealIP())
 	if err != nil {
-		log.Println("创建在线用户失败 -", err)
+		srv.logger.Println("创建在线用户失败 -", err)
 	}
 
 	serviceTicket := srv.authenticatingTickets.new(ticket, service)
@@ -721,17 +723,17 @@ func (srv *Server) logout(c echo.Context) error {
 		var err error
 		ticket, err = srv.tickets.RemoveTicket(ticketString)
 		if err != nil {
-			log.Println("删除 ticket 失败 -", err)
+			srv.logger.Println("删除 ticket 失败 -", err)
 			return echo.NewHTTPError(http.StatusUnauthorized, "删除 ticket 失败 - "+err.Error())
 		}
 	} else {
-		log.Println("ticket 不存在")
+		srv.logger.Println("ticket 不存在")
 	}
 
 	if ticket != nil {
 		err := srv.online.Delete(ticket.Username, c.RealIP())
 		if err != nil {
-			log.Println("删除 在线用户 失败 -", err)
+			srv.logger.Println("删除 在线用户 失败 -", err)
 		}
 	}
 
@@ -783,7 +785,7 @@ func (srv *Server) verifyTicket(c echo.Context) error {
 
 	ticket, err := srv.authenticatingTickets.fetchAndValidate(serviceTicket, service)
 	if err != nil {
-		log.Println("验证 ticket 失败 -", err)
+		srv.logger.Println("验证 ticket 失败 -", err)
 		return echo.NewHTTPError(http.StatusUnauthorized, "验证 ticket 失败 - "+err.Error())
 	}
 	if ticket == nil {
@@ -881,13 +883,13 @@ func readFileWithDefault(root string, files []string, defaultValue string) strin
 func Run(config *Config) {
 	srv, err := CreateServer(config)
 	if err != nil {
-		log.Println(err)
+		srv.logger.Println(err)
 		return
 	}
 
 	err = srv.Start(config.ListenAt)
 	if err != nil {
-		log.Println(err)
+		srv.logger.Println(err)
 		return
 	}
 }
