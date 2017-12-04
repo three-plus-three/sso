@@ -109,18 +109,7 @@ func Encode(values url.Values, h func() hash.Hash, secretKey []byte) string {
 	return Sign(s, h, secretKey) + "-" + s
 }
 
-func GetValuesFromCookie(req *http.Request, sessionKey string, verify func(data, sig string) bool) (url.Values, error) {
-	cookie, err := req.Cookie(sessionKey)
-	if err != nil {
-		if err == http.ErrNoCookie {
-			return nil, errors.New("session cookie isn't found")
-		}
-		return nil, err
-	}
-	return GetValuesFromStrng(cookie.Value, verify)
-}
-
-func GetValuesFromStrng(value string, verify func(data, sig string) bool) (url.Values, error) {
+func GetValuesFromString(value string, verify func(data, sig string) bool) (url.Values, error) {
 	if value == "" {
 		return nil, errors.New("session cookie is empty")
 	}
@@ -152,6 +141,17 @@ func GetValuesFromStrng(value string, verify func(data, sig string) bool) (url.V
 		return nil, errors.New("session is timeout")
 	}
 	return values, nil
+}
+
+func GetValuesFromCookie(req *http.Request, sessionKey string, verify func(data, sig string) bool) (url.Values, error) {
+	cookie, err := req.Cookie(sessionKey)
+	if err != nil {
+		if err == http.ErrNoCookie {
+			return nil, errors.New("session cookie isn't found")
+		}
+		return nil, err
+	}
+	return GetValuesFromString(cookie.Value, verify)
 }
 
 func GetValues(req *http.Request, sessionKey string, h func() hash.Hash, secretKey []byte) (url.Values, error) {

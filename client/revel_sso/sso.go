@@ -14,16 +14,16 @@ import (
 
 type CheckFunc func(c *revel.Controller) revel.Result
 
-func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(req *http.Request) url.URL) CheckFunc {
+func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(u *url.URL, ctrl *revel.Controller) url.URL) CheckFunc {
 	return func(c *revel.Controller) revel.Result {
 		if sso.SessionIsExpiredOrMissing(c.Session[sso.SESSION_EXPIRE_KEY]) ||
 			sso.SessionIsInvalid(c.Session[sso.SESSION_VALID_KEY]) {
 
 			var currentURL url.URL
 			if getURL != nil {
-				currentURL = getURL(c.Request.Request)
+				currentURL = getURL(c.Request.URL, c)
 			} else {
-				currentURL = *c.Request.Request.URL
+				currentURL = *c.Request.URL
 			}
 
 			serviceTicket := c.Params.Query.Get("ticket")
