@@ -268,7 +268,7 @@ func CreateServer(config *Config) (*Server, error) {
 				upath = strings.TrimPrefix(upath, "/")
 			}
 			for _, root := range config.TampletePaths {
-				filename := filepath.Join(root, upath)
+				filename := filepath.Join(root, "static", upath)
 				if _, err := os.Stat(filename); err == nil {
 					http.ServeFile(w, r, filename)
 					return
