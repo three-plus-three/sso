@@ -41,6 +41,7 @@ type dbUserHandler struct {
 	lockedFieldName      string
 	lockedTimeExpires    time.Duration
 	lockedTimeLayout     string
+	caseIgnore           bool
 }
 
 func createDbUserHandler(config *Config) (UserHandler, error) {
@@ -65,6 +66,7 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 	unlockSQL := ""
 	lockedSQL := ""
 
+	caseIgnore := true
 	userFieldName := "username"
 	passwordFieldName := "password"
 	lockedFieldName := "locked_at"
@@ -78,6 +80,12 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 			return nil, errors.New("数据库配置中的 username 的值不是字符串")
 		} else if s != "" {
 			userFieldName = s
+		}
+
+		if s, ok := stringWith(userConfig.Params, "username_case_ignore", ""); !ok {
+			return nil, errors.New("数据库配置中的 username 的值不是字符串")
+		} else if s != "false" {
+			caseIgnore = false
 		}
 
 		if s, ok := stringWith(userConfig.Params, "password", ""); !ok {
@@ -164,6 +172,7 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 		unlockSQL:            unlockSQL,
 		lockedSQL:            lockedSQL,
 		whiteIPListFieldName: whiteIPListFieldName,
+		caseIgnore:           caseIgnore,
 		userFieldName:        userFieldName,
 		passwordFieldName:    passwordFieldName,
 		lockedFieldName:      lockedFieldName,
@@ -272,10 +281,19 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 func (ah *dbUserHandler) Read(username string) (User, error) {
 	rows, err := ah.db.Query(ah.querySQL, username)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+		if !ah.caseIgnore {
 			return nil, nil
 		}
-		return nil, err
+		rows, err = ah.db.Query(ah.querySQL, strings.ToLower(username))
+		if err != nil {
+			if err != sql.ErrNoRows {
+				return nil, err
+			}
+			return nil, nil
+		}
 	}
 
 	var users []User
