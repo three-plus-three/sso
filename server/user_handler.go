@@ -84,7 +84,7 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 
 		if s, ok := stringWith(userConfig.Params, "username_case_ignore", ""); !ok {
 			return nil, errors.New("数据库配置中的 username 的值不是字符串")
-		} else if s != "false" {
+		} else if s == "false" {
 			caseIgnore = false
 		}
 
@@ -294,6 +294,7 @@ func (ah *dbUserHandler) Read(username string) (User, error) {
 			}
 			return nil, nil
 		}
+		username = strings.ToLower(username)
 	}
 
 	var users []User
@@ -337,6 +338,14 @@ func (ah *dbUserHandler) Read(username string) (User, error) {
 	}
 
 	if len(users) == 0 {
+		if !ah.caseIgnore {
+			return nil, nil
+		}
+
+		lowerUser := strings.ToLower(username)
+		if lowerUser != username {
+			return ah.Read(lowerUser)
+		}
 		return nil, nil
 	}
 

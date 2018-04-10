@@ -619,12 +619,21 @@ func (srv *Server) login(c echo.Context) error {
 			userData, err = srv.userNotFound(hostAddress, user.Username, user.Password)
 			if userData == nil && err == nil {
 				err = ErrUserNotFound
+			} else if userData != nil {
+				u, _ := stringWith(userData, "user", "")
+				if u == "" {
+					u, _ = stringWith(userData, "username", "")
+				}
+				if u != "" {
+					user.Username = u
+				}
 			}
 		}
 	} else {
 		err = auth.Auth(hostAddress, user.Password)
 		if err == nil {
 			userData = auth.Data()
+			user.Username = auth.Name()
 		}
 	}
 

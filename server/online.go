@@ -77,10 +77,15 @@ type dbOnline struct {
 func (do *dbOnline) Query(username string) ([]OnlineInfo, error) {
 	rows, err := do.db.Query(do.querySQL, username)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
+		if err != sql.ErrNoRows {
+			return nil, err
 		}
-		return nil, err
+
+		rows, err = do.db.Query(do.querySQL, strings.ToLower(username))
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+		return nil, nil
 	}
 	defer rows.Close()
 
@@ -114,7 +119,14 @@ func (do *dbOnline) Save(username, address string) error {
 	var userID int
 	err := do.db.QueryRow(do.queryUserIDSQL, username).Scan(&userID)
 	if err != nil {
-		return err
+		if err != sql.ErrNoRows {
+			return err
+		}
+
+		err = do.db.QueryRow(do.queryUserIDSQL, strings.ToLower(username)).Scan(&userID)
+		if err != nil {
+			return err
+		}
 	}
 	var count int
 
@@ -137,6 +149,7 @@ func (do *dbOnline) Save(username, address string) error {
 
 func (do *dbOnline) Delete(username, address string) error {
 	_, err := do.db.Exec(do.deleteSQL, username, address)
+	_, _ = do.db.Exec(do.deleteSQL, strings.ToLower(username), address)
 	return err
 }
 
