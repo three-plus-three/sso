@@ -760,7 +760,7 @@ func (srv *Server) logout(c echo.Context) error {
 			HttpOnly: cookie.HttpOnly,
 			Raw:      cookie.Raw,
 			Unparsed: cookie.Unparsed,
-			Expires:  time.Now().Add(1 * time.Second),
+			Expires:  time.Now(),
 			MaxAge:   -1})
 	}
 
