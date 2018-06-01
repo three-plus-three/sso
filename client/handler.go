@@ -7,7 +7,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Option struct {
@@ -64,7 +66,7 @@ func SSO(opt *Option) func(w http.ResponseWriter, req *http.Request, noAuth, nex
 			currentRequestURL := currentURL(req)
 			ticket, err := ssoClient.ValidateTicket(serviceTicket, currentRequestURL.String())
 			if err != nil {
-				log.Println("validate ticket fail,", err)
+				log.Println("validate ticket fail,", err, currentRequestURL.String())
 				noAuth.ServeHTTP(w, req)
 				return
 			}
@@ -104,6 +106,23 @@ func SSO(opt *Option) func(w http.ResponseWriter, req *http.Request, noAuth, nex
 			noAuth.ServeHTTP(w, req)
 			return
 		}
+
+		ts := time.Now().Add(30 * time.Minute)
+		sess.Set(SESSION_EXPIRE_KEY,
+			strconv.FormatInt(ts.Unix(), 10))
+		sess.Set("_TS",
+			strconv.FormatInt(ts.Unix(), 10))
+		sessionData := sess.Encode()
+
+		http.SetCookie(w, &http.Cookie{
+			Name:  sessionKey,
+			Value: Sign(sessionData, h, secretKey) + "-" + sessionData,
+			//Domain:   revel.CookieDomain,
+			Path: sessionPath,
+			//HttpOnly: true,
+			//Secure:   revel.CookieSecure,
+			// Expires: ts.UTC(), // 不指定过期时间，那么关闭浏览器后 cookie 会删除
+		})
 
 		next.ServeHTTP(w, req)
 	}
