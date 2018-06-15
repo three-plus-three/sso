@@ -213,6 +213,16 @@ func (ah *dbUserHandler) parseTime(o interface{}) (time.Time, error) {
 }
 
 func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User, error) {
+	if ah.userFieldName != "" {
+		if o := data[ah.userFieldName]; o != nil {
+			s, ok := o.(string)
+			if !ok {
+				return nil, fmt.Errorf("value of '"+ah.userFieldName+"' isn't string - %T", o)
+			}
+			user = s
+		}
+	}
+
 	var password string
 	if ah.passwordFieldName != "" {
 		if o := data[ah.passwordFieldName]; o != nil {
