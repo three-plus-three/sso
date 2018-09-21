@@ -551,7 +551,7 @@ func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user userLogin, onlin
 	if len(onlineList) == 1 {
 		if !isConsumeJSON(c) {
 			return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
-				" 上于登录，最后一次活动时间为 "+
+				" 上登录，最后一次活动时间为 "+
 				onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"), ErrUserAlreadyOnline)
 		}
 		return echo.NewHTTPError(http.StatusUnauthorized,
