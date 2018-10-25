@@ -527,6 +527,8 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 		message = "错误次数大多，帐号被锁定！"
 	} else if err == ErrPermissionDenied {
 		message = "用户没有访问权限"
+	} else if err == ErrMutiUsers {
+		message = "同名的用户有多个"
 	} else if IsErrExternalServer(err) {
 		message = err.Error()
 	} else {
