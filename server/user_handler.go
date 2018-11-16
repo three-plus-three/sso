@@ -262,7 +262,17 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 					continue
 				}
 
-				ipList = append(ipList, string(bs))
+				for _, field := range bytes.Split(bs, []byte(",")) {
+					if len(field) == 0 {
+						continue
+					}
+					field = bytes.TrimSpace(field)
+					if len(field) == 0 {
+						continue
+					}
+
+					ipList = append(ipList, string(field))
+				}
 			}
 			if err := scanner.Err(); err != nil {
 				return nil, fmt.Errorf("value of '"+ah.whiteIPListFieldName+"' isn't []string - %s", o)
