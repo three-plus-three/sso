@@ -104,6 +104,7 @@ type Config struct {
 	RedirectMode      string
 	CookiesForLogout  []*http.Cookie
 
+	LoginConflict  string
 	ListenAt       string
 	UserConfig     interface{}
 	UserNotFound   UserNotFound
@@ -134,6 +135,13 @@ func CreateServer(config *Config) (*Server, error) {
 	}
 	if config.MaxLoginFailCount <= 0 {
 		config.MaxLoginFailCount = 3
+	}
+
+	if config.LoginConflict != "force" &&
+		config.LoginConflict != "" &&
+		config.LoginConflict != "auto" &&
+		config.LoginConflict != "disableForce" {
+		return nil, errors.New("loginConflict is invalid - " + config.LoginConflict)
 	}
 
 	templateBox, err := rice.FindBox("static")
@@ -220,6 +228,7 @@ func CreateServer(config *Config) (*Server, error) {
 		theme:             config.Theme,
 		urlPrefix:         config.URLPrefix,
 		welcomeURL:        config.WelcomeURL,
+		loginConflict:     config.LoginConflict,
 		online:            online,
 		userHandler:       userHandler,
 		userNotFound:      config.UserNotFound,
@@ -305,6 +314,7 @@ type Server struct {
 	urlPrefix             string
 	welcomeURL            string
 	tokenName             string
+	loginConflict         string
 	maxLoginFailCount     int
 	userHandler           UserHandler
 	userNotFound          UserNotFound
@@ -543,7 +553,7 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 		"username":     user.Username,
 		"errorMessage": message,
 	}
-	if err == ErrUserAlreadyOnline {
+	if err == ErrUserAlreadyOnline && (srv.loginConflict == "auto" || srv.loginConflict == "") {
 		data["showForce"] = true
 	}
 	return c.Render(http.StatusOK, "login.html", data)
@@ -597,8 +607,18 @@ func (srv *Server) login(c echo.Context) error {
 		return srv.relogin(c, user, "请输入用户名", nil)
 	}
 
+	var isForce = user.isForce()
+	switch srv.loginConflict {
+	case "force":
+		isForce = true
+	case "", "auto":
+	case "disableForce":
+		isForce = false
+	default:
+	}
+
 	hostAddress := c.RealIP()
-	if user.isForce() && hostAddress != "127.0.0.1" {
+	if isForce && hostAddress != "127.0.0.1" {
 		// 判断用户是不是已经在其它主机上登录
 		if onlineList, err := srv.online.Query(user.Username); err != nil {
 			if !isConsumeJSON(c) {
