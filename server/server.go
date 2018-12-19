@@ -618,7 +618,7 @@ func (srv *Server) login(c echo.Context) error {
 	}
 
 	hostAddress := c.RealIP()
-	if isForce && hostAddress != "127.0.0.1" {
+	if !isForce && hostAddress != "127.0.0.1" {
 		// 判断用户是不是已经在其它主机上登录
 		if onlineList, err := srv.online.Query(user.Username); err != nil {
 			if !isConsumeJSON(c) {
