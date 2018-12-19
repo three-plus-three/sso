@@ -449,9 +449,9 @@ type userLogin struct {
 }
 
 func (ul *userLogin) isForce() bool {
-	return ul.ForceLogin != "on" &&
-		ul.ForceLogin != "true" &&
-		ul.ForceLogin != "checked"
+	return ul.ForceLogin == "on" ||
+		ul.ForceLogin == "true" ||
+		ul.ForceLogin == "checked"
 }
 
 func (srv *Server) lockedUsers(c echo.Context) error {
