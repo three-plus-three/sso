@@ -46,7 +46,7 @@ func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(u *url.URL, ct
 			if err != nil {
 				err = errors.New("验证 ticket 失败，" + err.Error())
 				log.Println(err)
-				c.Response.Status = http.StatusUnauthorized
+				c.Response.Status = http.StatusForbidden
 				return c.RenderError(err)
 			}
 
