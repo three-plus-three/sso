@@ -13,7 +13,7 @@ func main() {
 		UserConfig: dbConfig,
 		//UrlPrefix: "hw",
 		HeaderTitleText: "单点登录系统 v1.0",
-		FooterTitleText: "© 2019 ",
+		FooterTitleText: "© 2019",
 		TicketProtocol:  "jwt",
 		TicketConfig:    map[string]interface{}{},
 	}
