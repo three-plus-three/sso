@@ -20,7 +20,7 @@ func main() {
 
 	flag.StringVar(&config.ListenAt, "listen", ":9031", "")
 	flag.StringVar(&dbConfig.DbType, "dbType", "postgres", "")
-	flag.StringVar(&dbConfig.DbURL, "dbURL", "host=127.0.0.1 dbname=tpt_models_test user=postgres password=123456 sslmode=disable", "")
+	flag.StringVar(&dbConfig.DbURL, "dbURL", "host=127.0.0.1 dbname=ssotest user=ssotest password=123456 sslmode=disable", "")
 
 	flag.Parse()
 	if nil != flag.Args() && 0 != len(flag.Args()) {

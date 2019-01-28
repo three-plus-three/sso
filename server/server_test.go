@@ -25,7 +25,7 @@ import (
 )
 
 var dbType = flag.String("db.type", "postgres", "")
-var dbURL = flag.String("db.url", "host=127.0.0.1 port=5432 dbname=tpt_models_test user=tpt password=extreme sslmode=disable", "")
+var dbURL = flag.String("db.url", "host=127.0.0.1 port=5432 dbname=ssotest user=ssotest password=123456 sslmode=disable", "")
 
 type serverTest struct {
 	srv    *Server
