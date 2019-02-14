@@ -19,6 +19,7 @@ import (
 	rice "github.com/GeertJohan/go.rice"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
+	"github.com/mojocn/base64Captcha"
 )
 
 var (
@@ -85,6 +86,8 @@ type VerifyFunc func(method, username, password string) error
 
 // Config 服务的配置项
 type Config struct {
+	//数字验证码配置
+	Captcha         base64Captcha.ConfigDigit
 	Theme           string
 	URLPrefix       string
 	PlayPath        string
@@ -245,6 +248,7 @@ func CreateServer(config *Config) (*Server, error) {
 		redirect: func(c echo.Context, toURL string) error {
 			return c.Redirect(http.StatusTemporaryRedirect, toURL)
 		},
+		captcha:          config.Captcha,
 		data:             variables,
 		cookiesForLogout: config.CookiesForLogout,
 	}
@@ -300,6 +304,9 @@ func CreateServer(config *Config) (*Server, error) {
 	srv.engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
 	srv.engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
 
+	srv.engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(generateCaptcha(config.Captcha))))
+	// srv.engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
+
 	return srv, nil
 }
 
@@ -324,9 +331,9 @@ type Server struct {
 	authenticatingTickets authenticatingTickets
 	failCounter           FailCounter
 	logger                *log.Logger
-
-	redirect func(c echo.Context, url string) error
-	data     map[string]interface{}
+	captcha               interface{}
+	redirect              func(c echo.Context, url string) error
+	data                  map[string]interface{}
 
 	cookiesForLogout []*http.Cookie
 }
@@ -366,6 +373,21 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 
 var funcs = template.FuncMap{
 	"query": url.QueryEscape,
+	"htmlattr": func(s string) template.HTMLAttr {
+		return template.HTMLAttr(s)
+	},
+	"html": func(s string) template.HTML {
+		return template.HTML(s)
+	},
+	"js": func(s string) template.JS {
+		return template.JS(s)
+	},
+	"set_src": func(s string) template.Srcset {
+		return template.Srcset(s)
+	},
+	"jsstr": func(s string) template.JSStr {
+		return template.JSStr(s)
+	},
 }
 
 func (r *renderer) loadTemplate(name string) (*template.Template, error) {
@@ -445,6 +467,10 @@ type userLogin struct {
 	Password   string `json:"password" xml:"password" form:"password" query:"password"`
 	Service    string `json:"service" xml:"service" form:"service" query:"service"`
 	ForceLogin string `json:"force,omitempty" xml:"force" form:"force" query:"force"`
+
+	CaptchaKey   string `json:"captcha_key,omitempty" xml:"captcha_key" form:"captcha_key" query:"captcha_key"`
+	CaptchaValue string `json:"captcha_value,omitempty" xml:"captcha_value" form:"captcha_value" query:"captcha_value"`
+
 	//LoginFailCount int    `json:"login_fail_count,omitempty" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
 }
 
@@ -553,6 +579,17 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 		"username":     user.Username,
 		"errorMessage": message,
 	}
+
+	if count := srv.failCounter.Count(user.Username); count > 0 {
+		captchaID := "" // time.Now().Format(time.RFC3339Nano)
+		data["captcha_id"] = captchaID
+		captchaKey, captchaCode := base64Captcha.GenerateCaptcha(captchaID, srv.captcha)
+		data["captcha_data"] = base64Captcha.CaptchaWriteToBase64Encoding(captchaCode)
+		data["captcha_key"] = captchaKey
+
+		fmt.Println(data["captcha_data"])
+	}
+
 	if err == ErrUserAlreadyOnline && (srv.loginConflict == "auto" || srv.loginConflict == "") {
 		data["showForce"] = true
 	}
@@ -604,7 +641,29 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 	if user.Username == "" {
+		if isConsumeJSON(c) {
+			return c.String(http.StatusUnauthorized, "请输入用户名")
+		}
+
 		return srv.relogin(c, user, "请输入用户名", nil)
+	}
+
+	if count := srv.failCounter.Count(user.Username); count > 0 {
+		if user.CaptchaKey == "" || user.CaptchaValue == "" {
+			if isConsumeJSON(c) {
+				return c.String(http.StatusUnauthorized, "请输入验证码")
+			}
+			return srv.relogin(c, user, "请输入验证码", nil)
+		}
+
+		//比较图像验证码
+		if !base64Captcha.VerifyCaptcha(user.CaptchaKey, user.CaptchaValue) {
+			if isConsumeJSON(c) {
+				return c.String(http.StatusUnauthorized, "验证码不正确")
+			}
+
+			return srv.relogin(c, user, "验证码不正确", nil)
+		}
 	}
 
 	var isForce = user.isForce()
