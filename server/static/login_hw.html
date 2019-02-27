@@ -37,11 +37,15 @@
 			.footer{color: #556372;font-size: 14px;text-align: right;padding: 170px 40px 0;}
 			.Verification_Code{margin-top:-7px;margin-left:150px;background-color:white;border-radius:6px;width:150px;height:35px;}
 
+			.customer_name
+			{font-size:18px !important;color: #ffffff !important;margin-bottom:10px !important;}
 		</style>
 	</head>
 	<body>
 		<div class="login-wrap">
 			<div class="login">
+
+				<label class="customer_name">{{.global.client_title_text}}</label>
 				<label>{{.global.header_title_text}}</label>
 				<div class="login-input clearfix">
 

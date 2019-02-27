@@ -91,6 +91,7 @@ type Config struct {
 	Theme           string
 	URLPrefix       string
 	PlayPath        string
+	ClientTitleText string
 	HeaderTitleText string
 	FooterTitleText string
 	LogoPath        string
@@ -205,6 +206,8 @@ func CreateServer(config *Config) (*Server, error) {
 	variables["url_prefix"] = config.URLPrefix
 	variables["play_path"] = config.PlayPath
 	variables["application_context"] = config.URLPrefix
+
+	variables["client_title_text"] = config.ClientTitleText
 	variables["header_title_text"] = config.HeaderTitleText
 	variables["footer_title_text"] = config.FooterTitleText
 	variables["logo_png"] = config.LogoPath
@@ -619,7 +622,7 @@ func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user userLogin, onlin
 func (srv *Server) lockUserIfNeed(c echo.Context, user userLogin) {
 	srv.failCounter.Fail(user.Username)
 	var failCount = srv.failCounter.Count(user.Username)
-	if failCount > srv.maxLoginFailCount {
+	if failCount > srv.maxLoginFailCount && "admin" != user.Username {
 		if err := srv.userHandler.Lock(user.Username); err != nil {
 			srv.logger.Println("lock", user.Username, "fail,", err)
 		}
@@ -722,7 +725,7 @@ func (srv *Server) login(c echo.Context) error {
 		srv.logger.Println("用户授权失败 -", err)
 
 		// auth == nil 是说明不是用户，不必计数
-		if auth != nil && err == ErrPasswordNotMatch && "admin" != user.Username {
+		if auth != nil && err == ErrPasswordNotMatch {
 			srv.lockUserIfNeed(c, user)
 		}
 
