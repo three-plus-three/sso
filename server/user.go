@@ -90,7 +90,7 @@ func (u *UserImpl) isValid(currentAddr string) (bool, error) {
 		}
 	}
 
-	if !u.lockedAt.IsZero() {
+	if !u.lockedAt.IsZero() && u.name != "admin" {
 		if u.lockedTimeExpires == 0 {
 			return false, ErrUserLocked
 		}

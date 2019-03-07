@@ -589,8 +589,6 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 		captchaKey, captchaCode := base64Captcha.GenerateCaptcha(captchaID, srv.captcha)
 		data["captcha_data"] = base64Captcha.CaptchaWriteToBase64Encoding(captchaCode)
 		data["captcha_key"] = captchaKey
-
-		fmt.Println(data["captcha_data"])
 	}
 
 	if err == ErrUserAlreadyOnline && (srv.loginConflict == "auto" || srv.loginConflict == "") {
