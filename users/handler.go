@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/three-plus-three/modules/netutil"
-	"github.com/three-plus-three/sso/users"
 )
 
 // DefaultUserManager 缺省 UserManager
@@ -33,14 +32,14 @@ type LockedUser struct {
 
 // UserManager 读用户配置的 Handler
 type UserManager interface {
-	Read(userinfo *UserInfo) (User, error)
+	Read(loginInfo *LoginInfo) (Authentication, error)
 	Lock(username string) error
 	Unlock(username string) error
 	Locked() ([]LockedUser, error)
 
 	FailCount(username string) int
 
-	Auth(u User, userinfo *UserInfo) error
+	Auth(u Authentication, loginInfo *LoginInfo) (*UserInfo, error)
 }
 
 func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, string) error, externalVerify VerifyFunc) (UserManager, error) {
@@ -50,6 +49,7 @@ func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, str
 	lockedSQL := ""
 
 	caseIgnore := true
+	idFieldName := "id"
 	userFieldName := "username"
 	passwordFieldName := "password"
 	lockedFieldName := "locked_at"
@@ -59,6 +59,12 @@ func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, str
 	whiteIPListFieldName := "white_addresses"
 
 	if userConfig.Params != nil {
+		if s, ok := stringWith(userConfig.Params, "userid", ""); !ok {
+			return nil, errors.New("数据库配置中的 username 的值不是字符串")
+		} else if s != "" {
+			idFieldName = s
+		}
+
 		if s, ok := stringWith(userConfig.Params, "username", ""); !ok {
 			return nil, errors.New("数据库配置中的 username 的值不是字符串")
 		} else if s != "" {
@@ -147,6 +153,7 @@ func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, str
 		lockedSQL:            lockedSQL,
 		whiteIPListFieldName: whiteIPListFieldName,
 		caseIgnore:           caseIgnore,
+		idFieldName:          idFieldName,
 		userFieldName:        userFieldName,
 		passwordFieldName:    passwordFieldName,
 		lockedFieldName:      lockedFieldName,
@@ -163,6 +170,7 @@ type userManager struct {
 	lockSQL              string
 	unlockSQL            string
 	lockedSQL            string
+	idFieldName          string
 	userFieldName        string
 	passwordFieldName    string
 	whiteIPListFieldName string
@@ -170,29 +178,6 @@ type userManager struct {
 	lockedTimeExpires    time.Duration
 	lockedTimeLayout     string
 	caseIgnore           bool
-}
-
-func (ah *userManager) SetUserNotFound(userNotFound UserNotFound) {
-	ah.userNotFound = userNotFound
-}
-
-func (ah *userManager) UserNotFound(userinfo *UserInfo) (map[string]interface{}, error) {
-	if ah.userNotFound != nil {
-		userData, err := ah.userNotFound(userinfo)
-		if err != nil {
-			return nil, err
-		}
-		if userData != nil {
-			u, _ := users.StringWith(userData, "user", "")
-			if u == "" {
-				u, _ = users.StringWith(userData, "username", "")
-			}
-			if u != "" {
-				userinfo.Username = u
-			}
-		}
-	}
-	return nil, nil
 }
 
 func (ah *userManager) toLockedUser(data map[string]interface{}) LockedUser {
@@ -226,7 +211,12 @@ func (ah *userManager) parseTime(o interface{}) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %T:%v", o, o)
 }
 
-func (ah *userManager) toUser(user string, data map[string]interface{}) (User, error) {
+func (ah *userManager) toUser(user string, data map[string]interface{}) (Authentication, error) {
+	var id interface{}
+	if ah.idFieldName != "" {
+		id = data[ah.idFieldName]
+	}
+
 	if ah.userFieldName != "" {
 		if o := data[ah.userFieldName]; o != nil {
 			s, ok := o.(string)
@@ -303,6 +293,7 @@ func (ah *userManager) toUser(user string, data map[string]interface{}) (User, e
 	return &UserImpl{
 		externalVerify:    ah.externalVerify,
 		verify:            ah.verify,
+		id:                id,
 		name:              user,
 		password:          password,
 		lockedAt:          lockedAt,
@@ -312,8 +303,8 @@ func (ah *userManager) toUser(user string, data map[string]interface{}) (User, e
 	}, nil
 }
 
-func (ah *userManager) Read(userinfo *UserInfo) (User, error) {
-	username := userinfo.Username
+func (ah *userManager) Read(loginInfo *LoginInfo) (Authentication, error) {
+	username := loginInfo.Username
 	rows, err := ah.db.Query(ah.querySQL, username)
 	if err != nil {
 		if err != sql.ErrNoRows {
@@ -332,7 +323,7 @@ func (ah *userManager) Read(userinfo *UserInfo) (User, error) {
 		username = strings.ToLower(username)
 	}
 
-	var users []User
+	var users []Authentication
 	for rows.Next() {
 		columns, err := rows.Columns()
 		if err != nil {
@@ -379,8 +370,8 @@ func (ah *userManager) Read(userinfo *UserInfo) (User, error) {
 
 		lowerUser := strings.ToLower(username)
 		if lowerUser != username {
-			userinfo.Username = lowerUser
-			return ah.Read(userinfo)
+			loginInfo.Username = lowerUser
+			return ah.Read(loginInfo)
 		}
 		return nil, nil
 	}
@@ -477,21 +468,20 @@ func (ah *userManager) FailCount(username string) int {
 	return 0
 }
 
-func (ah *userManager) Auth(u User, userinfo *UserInfo) error {
-	return u.Auth(userinfo)
+func (ah *userManager) Auth(u Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	return u.Auth(loginInfo)
 }
 
-func Auth(um UserManager, userinfo *UserInfo) (User, error) {
-	auth, err := um.Read(userinfo)
+func Auth(um UserManager, loginInfo *LoginInfo) (*UserInfo, error) {
+	auth, err := um.Read(loginInfo)
 	if err != nil {
 		return nil, err
 	}
 
-	err = um.Auth(auth, &user)
+	userinfo, err := um.Auth(auth, loginInfo)
 	if err == nil {
-		userData = auth.Data()
-		user.Username = auth.Name()
+		loginInfo.Username = userinfo.RawName()
 	}
 
-	return auth, err
+	return userinfo, err
 }

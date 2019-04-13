@@ -86,7 +86,6 @@ type UserNotFound = users.UserNotFound
 // DbConfig 服务的数据库配置项
 type DbConfig = users.DbConfig
 
-type User = users.User
 type LockedUser = users.LockedUser
 type UserManager = users.UserManager
 
@@ -519,7 +518,7 @@ func (srv *Server) loginGet(c echo.Context) error {
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
-func (srv *Server) relogin(c echo.Context, user users.UserInfo, message string, err error) error {
+func (srv *Server) relogin(c echo.Context, loginInfo users.LoginInfo, message string, err error) error {
 	if ErrUserIPBlocked == err {
 		message = "用户不能在该地址访问"
 	} else if err == ErrUserLocked {
@@ -537,13 +536,13 @@ func (srv *Server) relogin(c echo.Context, user users.UserInfo, message string, 
 	}
 
 	data := map[string]interface{}{"global": srv.data,
-		"service": user.Service,
-		// "login_fail_count": user.LoginFailCount,
-		"username":     user.Username,
+		"service": loginInfo.Service,
+		// "login_fail_count": loginInfo.LoginFailCount,
+		"username":     loginInfo.Username,
 		"errorMessage": message,
 	}
 
-	if count := srv.userManager.FailCount(user.Username); count > 0 {
+	if count := srv.userManager.FailCount(loginInfo.Username); count > 0 {
 		captchaID := "" // time.Now().Format(time.RFC3339Nano)
 		data["captcha_id"] = captchaID
 		captchaKey, captchaCode := base64Captcha.GenerateCaptcha(captchaID, srv.captcha)
@@ -557,10 +556,10 @@ func (srv *Server) relogin(c echo.Context, user users.UserInfo, message string, 
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
-func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user users.UserInfo, onlineList []OnlineInfo) error {
+func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, loginInfo users.LoginInfo, onlineList []users.SessionInfo) error {
 	if len(onlineList) == 1 {
 		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
+			return srv.relogin(c, loginInfo, "用户已在 "+onlineList[0].Address+
 				" 上登录，最后一次活动时间为 "+
 				onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00"), ErrUserAlreadyOnline)
 		}
@@ -572,14 +571,14 @@ func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user users.UserInfo, 
 	}
 
 	if !isConsumeJSON(c) {
-		return srv.relogin(c, user, "用户已在其他机器上登录", ErrUserAlreadyOnline)
+		return srv.relogin(c, loginInfo, "用户已在其他机器上登录", ErrUserAlreadyOnline)
 	}
 	return ErrUserAlreadyOnline
 }
 
 func (srv *Server) login(c echo.Context) error {
-	var user users.UserInfo
-	if err := c.Bind(&user); err != nil {
+	var loginInfo users.LoginInfo
+	if err := c.Bind(&loginInfo); err != nil {
 		srv.logger.Println("登录数据的格式不正确 -", err)
 
 		if !isConsumeJSON(c) {
@@ -591,43 +590,43 @@ func (srv *Server) login(c echo.Context) error {
 		}
 		return echo.ErrUnauthorized
 	}
-	if user.Username == "" {
+	if loginInfo.Username == "" {
 		if isConsumeJSON(c) {
 			return c.String(http.StatusUnauthorized, "请输入用户名")
 		}
 
-		return srv.relogin(c, user, "请输入用户名", nil)
+		return srv.relogin(c, loginInfo, "请输入用户名", nil)
 	}
 
-	if count := srv.userManager.FailCount(user.Username); count > 0 {
-		if user.CaptchaKey == "" || user.CaptchaValue == "" {
+	if count := srv.userManager.FailCount(loginInfo.Username); count > 0 {
+		if loginInfo.CaptchaKey == "" || loginInfo.CaptchaValue == "" {
 			if isConsumeJSON(c) {
 				return c.String(http.StatusUnauthorized, "请输入验证码")
 			}
-			return srv.relogin(c, user, "请输入验证码", nil)
+			return srv.relogin(c, loginInfo, "请输入验证码", nil)
 		}
 
 		//比较图像验证码
-		if !base64Captcha.VerifyCaptcha(user.CaptchaKey, user.CaptchaValue) {
+		if !base64Captcha.VerifyCaptcha(loginInfo.CaptchaKey, loginInfo.CaptchaValue) {
 			if isConsumeJSON(c) {
 				return c.String(http.StatusUnauthorized, "验证码不正确")
 			}
 
-			return srv.relogin(c, user, "验证码不正确", nil)
+			return srv.relogin(c, loginInfo, "验证码不正确", nil)
 		}
 	}
 
-	user.Address = c.RealIP()
+	loginInfo.Address = c.RealIP()
 
 	var userData map[string]interface{}
 
-	auth, err := users.Auth(srv.userManager, &user)
+	auth, err := users.Auth(srv.userManager, &loginInfo)
 	if err != nil || auth == nil {
 		if err == nil {
 			err = ErrUserNotFound
 		}
 		if onlineList, ok := users.IsOnlinedError(err); ok {
-			return srv.alreadyLoginOnOtherHost(c, user, onlineList)
+			return srv.alreadyLoginOnOtherHost(c, loginInfo, onlineList)
 		}
 	}
 
@@ -635,7 +634,7 @@ func (srv *Server) login(c echo.Context) error {
 		srv.logger.Println("用户授权失败 -", err)
 
 		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, "", err)
+			return srv.relogin(c, loginInfo, "", err)
 		}
 
 		// 不要将过多的信息暴露给用户，仅将特定的信息返回
@@ -655,21 +654,21 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	ticket, err := srv.tickets.NewTicket(user.Username, userData)
+	ticket, err := srv.tickets.NewTicket(loginInfo.Username, userData)
 	if err != nil {
 		srv.logger.Println("内部生成 ticket 失败 -", err)
 
 		if !isConsumeJSON(c) {
-			return srv.relogin(c, user, "", err)
+			return srv.relogin(c, loginInfo, "", err)
 		}
 		return echo.ErrUnauthorized
 	}
 
-	return srv.loginOK(c, ticket, user.Service)
+	return srv.loginOK(c, ticket, loginInfo.Service)
 }
 
 func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
-	err := srv.online.Save(ticket.Username, c.RealIP())
+	err := srv.online.Login(ticket.Username, c.RealIP())
 	if err != nil {
 		srv.logger.Println("创建在线用户失败 -", err)
 	}

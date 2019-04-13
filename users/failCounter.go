@@ -12,8 +12,8 @@ type failCounterWrapper struct {
 	maxLoginFailCount int
 }
 
-func (fcw *failCounterWrapper) Read(userinfo *UserInfo) (User, error) {
-	return fcw.inner.Read(userinfo)
+func (fcw *failCounterWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
+	return fcw.inner.Read(loginInfo)
 }
 
 func (fcw *failCounterWrapper) Lock(username string) error {
@@ -36,24 +36,24 @@ func (fcw *failCounterWrapper) FailCount(username string) int {
 	return fcw.failCounter.Count(username)
 }
 
-func (fcw *failCounterWrapper) Auth(auth User, userinfo *UserInfo) error {
-	err := auth.Auth(userinfo)
+func (fcw *failCounterWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	userInfo, err := fcw.inner.Auth(auth, loginInfo)
 	if err == nil {
-		fcw.failCounter.Zero(userinfo.Username)
+		fcw.failCounter.Zero(loginInfo.Username)
 	} else {
 		if err == ErrPasswordNotMatch {
-			fcw.lockUserIfNeed(userinfo)
+			fcw.lockUserIfNeed(loginInfo)
 		}
 	}
-	return err
+	return userInfo, err
 }
 
-func (fcw *failCounterWrapper) lockUserIfNeed(userinfo *UserInfo) {
-	fcw.failCounter.Fail(userinfo.Username)
-	var failCount = fcw.failCounter.Count(userinfo.Username)
-	if failCount > fcw.maxLoginFailCount && "admin" != userinfo.Username {
-		if err := fcw.inner.Lock(userinfo.Username); err != nil {
-			fcw.logger.Println("lock", userinfo.Username, "fail,", err)
+func (fcw *failCounterWrapper) lockUserIfNeed(loginInfo *LoginInfo) {
+	fcw.failCounter.Fail(loginInfo.Username)
+	var failCount = fcw.failCounter.Count(loginInfo.Username)
+	if failCount > fcw.maxLoginFailCount && "admin" != loginInfo.Username {
+		if err := fcw.inner.Lock(loginInfo.Username); err != nil {
+			fcw.logger.Println("lock", loginInfo.Username, "fail,", err)
 		}
 	}
 }

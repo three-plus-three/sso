@@ -20,7 +20,7 @@ type SessionInfo struct {
 }
 
 type Sessions interface {
-	Login(userid int64, userinfo *UserInfo) (string, error)
+	Login(userid int64, loginInfo *LoginInfo) (string, error)
 	Logout(key string) error
 
 	Query(username string) ([]SessionInfo, error)
@@ -76,9 +76,9 @@ func (do *dbOnline) Query(username string) ([]SessionInfo, error) {
 	return onlineList, nil
 }
 
-func (do *dbOnline) Login(userid int64, userinfo *UserInfo) (string, error) {
+func (do *dbOnline) Login(userid int64, loginInfo *LoginInfo) (string, error) {
 	uuid := GenerateID()
-	_, err := do.db.Exec(do.insertSQL, userid, uuid, userinfo.Address)
+	_, err := do.db.Exec(do.insertSQL, userid, uuid, loginInfo.Address)
 	if err != nil {
 		return "", err
 	}
@@ -138,8 +138,8 @@ type onlineWrapper struct {
 	loginConflict string
 }
 
-func (ow *onlineWrapper) Read(userinfo *UserInfo) (User, error) {
-	var isForce = userinfo.IsForce()
+func (ow *onlineWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
+	var isForce = loginInfo.IsForce()
 	switch ow.loginConflict {
 	case "force":
 		isForce = true
@@ -149,14 +149,14 @@ func (ow *onlineWrapper) Read(userinfo *UserInfo) (User, error) {
 	default:
 	}
 
-	if !isForce && userinfo.Address != "127.0.0.1" {
+	if !isForce && loginInfo.Address != "127.0.0.1" {
 		// 判断用户是不是已经在其它主机上登录
-		if onlineList, err := ow.online.Query(userinfo.Username); err != nil {
+		if onlineList, err := ow.online.Query(loginInfo.Username); err != nil {
 			return nil, err
 		} else if len(onlineList) != 0 {
 			found := false
 			for _, ol := range onlineList {
-				if ol.Address == userinfo.Address {
+				if ol.Address == loginInfo.Address {
 					found = true
 					break
 				}
@@ -167,7 +167,7 @@ func (ow *onlineWrapper) Read(userinfo *UserInfo) (User, error) {
 		}
 	}
 
-	return ow.inner.Read(userinfo)
+	return ow.inner.Read(loginInfo)
 }
 
 func (ow *onlineWrapper) Lock(username string) error {
@@ -186,8 +186,8 @@ func (ow *onlineWrapper) FailCount(username string) int {
 	return ow.inner.FailCount(username)
 }
 
-func (ow *onlineWrapper) Auth(auth User, userinfo *UserInfo) error {
-	return ow.inner.Auth(auth, userinfo)
+func (ow *onlineWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	return ow.inner.Auth(auth, loginInfo)
 }
 
 func OnlineWrap(um UserManager, online Sessions, loginConflict string, logger *log.Logger) UserManager {

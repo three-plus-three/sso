@@ -8,34 +8,57 @@ type notfoundWrapper struct {
 	userNotFound UserNotFound
 }
 
-func (ow *notfoundWrapper) Read(userinfo *UserInfo) (User, error) {
-	return ow.inner.Read(userinfo)
+func (nfw *notfoundWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
+	u, err := nfw.inner.Read(loginInfo)
+	if nfw.userNotFound == nil {
+		return u, err
+	}
+
+	if err != nil {
+		if err != ErrUserNotFound {
+			return nil, err
+		}
+	} else if u != nil {
+		return u, nil
+	}
+
+	userData, err := nfw.userNotFound(loginInfo)
+	if err != nil {
+		return nil, err
+	}
+	if userData != nil {
+		u, _ := StringWith(userData, "user", "")
+		if u == "" {
+			u, _ = StringWith(userData, "username", "")
+		}
+		if u != "" {
+			loginInfo.Username = u
+		}
+	}
+	return nil, nil
 }
 
-func (ow *notfoundWrapper) Lock(username string) error {
-	return ow.inner.Lock(username)
+func (nfw *notfoundWrapper) Lock(username string) error {
+	return nfw.inner.Lock(username)
 }
 
-func (ow *notfoundWrapper) Unlock(username string) error {
-	return ow.inner.Unlock(username)
+func (nfw *notfoundWrapper) Unlock(username string) error {
+	return nfw.inner.Unlock(username)
 }
 
-func (ow *notfoundWrapper) Locked() ([]LockedUser, error) {
-	return ow.inner.Locked()
+func (nfw *notfoundWrapper) Locked() ([]LockedUser, error) {
+	return nfw.inner.Locked()
 }
 
-func (ow *notfoundWrapper) FailCount(username string) int {
-	return ow.inner.FailCount(username)
+func (nfw *notfoundWrapper) FailCount(username string) int {
+	return nfw.inner.FailCount(username)
 }
 
-func (ow *notfoundWrapper) Auth(auth User, userinfo *UserInfo) error {
-	return ow.inner.Auth(auth, userinfo)
+func (nfw *notfoundWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	return nfw.inner.Auth(auth, loginInfo)
 }
 
 func NotfoundWrap(um UserManager, userNotFound UserNotFound, logger *log.Logger) UserManager {
-	if online == nil {
-		return um
-	}
 	return &notfoundWrapper{
 		logger:       logger,
 		inner:        um,

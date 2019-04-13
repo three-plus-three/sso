@@ -9,7 +9,7 @@ import (
 	"github.com/three-plus-three/modules/netutil"
 )
 
-type UserInfo struct {
+type LoginInfo struct {
 	Username   string `json:"username" xml:"username" form:"username" query:"username"`
 	Password   string `json:"password" xml:"password" form:"password" query:"password"`
 	Service    string `json:"service" xml:"service" form:"service" query:"service"`
@@ -21,28 +21,58 @@ type UserInfo struct {
 	Address string
 }
 
-func (u *UserInfo) IsForce() bool {
+func (u *LoginInfo) IsForce() bool {
 	return u.ForceLogin == "on" ||
 		u.ForceLogin == "true" ||
 		u.ForceLogin == "checked"
 }
 
-type User interface {
-	Name() string
+type UserInfo struct {
+	LoginInfo
+	ID   interface{}
+	Data map[string]interface{}
+}
+
+func (u *UserInfo) RawName() string {
+	if u.Data == nil {
+		return u.Username
+	}
+	if o := u.Data["user"]; o != nil {
+		if s, ok := o.(string); ok {
+			return s
+		}
+	}
+
+	if o := u.Data["username"]; o != nil {
+		if s, ok := o.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+type Authentication interface {
+	Auth(loginInfo *LoginInfo) (*UserInfo, error)
+}
+
+type LocalUser interface {
+	ID() interface{}
+	Username() string
 	Data() map[string]interface{}
 }
 
-// VerifyFunc 用户验证回调类型，method 为扩展类型， inner 为数据库中保存的数据 userinfo 为界面上用户填写的
-type VerifyFunc func(method string, inner InternalUser, userinfo *UserInfo) error
+// VerifyFunc 用户验证回调类型，method 为扩展类型， inner 为数据库中保存的数据 loginInfo 为界面上用户填写的
+type VerifyFunc func(method string, localUser LocalUser, loginInfo *LoginInfo) (*UserInfo, error)
 
 // UserNotFound 用户不存在时的回调
-type UserNotFound func(userinfo *UserInfo) (map[string]interface{}, error)
+type UserNotFound func(loginInfo *LoginInfo) (map[string]interface{}, error)
 
 var localAddressList, _ = net.LookupHost("localhost")
 
 type UserImpl struct {
 	verify            func(password, excepted string) error
 	externalVerify    VerifyFunc
+	id                interface{}
 	name              string
 	password          string
 	lockedAt          time.Time
@@ -52,7 +82,11 @@ type UserImpl struct {
 	// failCount         int
 }
 
-func (u *UserImpl) Name() string {
+func (u *UserImpl) ID() interface{} {
+	return u.id
+}
+
+func (u *UserImpl) Username() string {
 	return u.name
 }
 
@@ -112,13 +146,13 @@ func (u *UserImpl) Data() map[string]interface{} {
 	return u.data
 }
 
-func (u *UserImpl) Auth(userinfo *UserInfo) error {
-	ok, err := u.isValid(userinfo.Address)
+func (u *UserImpl) Auth(loginInfo *LoginInfo) (*UserInfo, error) {
+	ok, err := u.isValid(loginInfo.Address)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
-		return errors.New("user is inused")
+		return nil, errors.New("user is inused")
 	}
 
 	var method string
@@ -127,20 +161,24 @@ func (u *UserImpl) Auth(userinfo *UserInfo) error {
 	}
 
 	if method != "" && method != "builin" {
-		return u.externalVerify(method, u, userinfo)
+		return u.externalVerify(method, u, loginInfo)
 	}
 
 	exceptedPassword := u.Password()
 	if exceptedPassword == "" {
-		return ErrPasswordEmpty
+		return nil, ErrPasswordEmpty
 	}
 
-	err = u.verify(userinfo.Password, exceptedPassword)
+	err = u.verify(loginInfo.Password, exceptedPassword)
 	if err != nil {
 		if err == ErrSignatureInvalid {
-			return ErrPasswordNotMatch
+			return nil, ErrPasswordNotMatch
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	return &UserInfo{
+		LoginInfo: *loginInfo,
+		ID:        u.id,
+		Data:      u.data,
+	}, nil
 }
