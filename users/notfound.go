@@ -2,6 +2,17 @@ package users
 
 import "log"
 
+type SimpleAuthentication struct {
+	UserData map[string]interface{}
+}
+
+func (u *SimpleAuthentication) Auth(loginInfo *LoginInfo) (*UserInfo, error) {
+	return &UserInfo{
+		LoginInfo: *loginInfo,
+		Data:      u.UserData,
+	}, nil
+}
+
 type notfoundWrapper struct {
 	logger       *log.Logger
 	inner        UserManager
@@ -26,16 +37,7 @@ func (nfw *notfoundWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
 	if err != nil {
 		return nil, err
 	}
-	if userData != nil {
-		u, _ := StringWith(userData, "user", "")
-		if u == "" {
-			u, _ = StringWith(userData, "username", "")
-		}
-		if u != "" {
-			loginInfo.Username = u
-		}
-	}
-	return nil, nil
+	return &SimpleAuthentication{UserData: userData}, nil
 }
 
 func (nfw *notfoundWrapper) Lock(username string) error {

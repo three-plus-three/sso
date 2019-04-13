@@ -177,7 +177,7 @@ func CreateServer(config *Config) (*Server, error) {
 	// UserConfig     interface{}
 	// AuthConfig     interface{}
 
-	userManager, err := DefaultUserHandler(config, logger)
+	userManager, online, err := DefaultUserHandler(config, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +224,7 @@ func CreateServer(config *Config) (*Server, error) {
 		urlPrefix:      config.URLPrefix,
 		welcomeURL:     config.WelcomeURL,
 		userManager:    userManager,
+		online:         online,
 		tokenName:      tokenName,
 		ticketGetter:   ticketGetter,
 		tickets:        ticketHandler,
@@ -308,8 +309,8 @@ type Server struct {
 	urlPrefix             string
 	welcomeURL            string
 	tokenName             string
-	userManager           UserManager
-	userNotFound          UserNotFound
+	userManager           users.UserManager
+	online                users.Sessions
 	tickets               TicketHandler
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
@@ -620,8 +621,8 @@ func (srv *Server) login(c echo.Context) error {
 
 	var userData map[string]interface{}
 
-	auth, err := users.Auth(srv.userManager, &loginInfo)
-	if err != nil || auth == nil {
+	userinfo, err := users.Auth(srv.userManager, &loginInfo)
+	if err != nil || userinfo == nil {
 		if err == nil {
 			err = ErrUserNotFound
 		}
@@ -664,25 +665,25 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	return srv.loginOK(c, ticket, loginInfo.Service)
+	return srv.loginOK(c, ticket, userinfo)
 }
 
-func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
-	err := srv.online.Login(ticket.Username, c.RealIP())
+func (srv *Server) loginOK(c echo.Context, ticket *Ticket, userinfo *users.UserInfo) error {
+	err := srv.online.Login(userinfo.ID, userinfo.Address, userinfo.Service)
 	if err != nil {
 		srv.logger.Println("创建在线用户失败 -", err)
 	}
 
-	serviceTicket := srv.authenticatingTickets.new(ticket, service)
+	serviceTicket := srv.authenticatingTickets.new(ticket, userinfo.Service)
 
 	c.SetCookie(&http.Cookie{Name: srv.tokenName,
 		Value: ticket.Ticket,
 		Path:  srv.cookiePath,
 		// Expires: ticket.ExpiresAt, // 不指定过期时间，那么关闭浏览器后 cookie 会删除
 	})
-	if service != "" {
-		returnURL := service
-		u, err := url.Parse(service)
+	if userinfo.Service != "" {
+		returnURL := userinfo.Service
+		u, err := url.Parse(returnURL)
 		if err == nil {
 			queryParams := u.Query()
 			queryParams.Set("ticket", serviceTicket)
@@ -727,7 +728,7 @@ func (srv *Server) logout(c echo.Context) error {
 	}
 
 	if ticket != nil {
-		err := srv.online.Delete(ticket.Username, c.RealIP())
+		err := srv.online.Logout(ticket.Username, c.RealIP())
 		if err != nil {
 			srv.logger.Println("删除 在线用户 失败 -", err)
 		}

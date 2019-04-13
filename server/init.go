@@ -8,15 +8,15 @@ import (
 	"github.com/three-plus-three/sso/users"
 )
 
-var DefaultUserHandler = func(config *Config, logger *log.Logger) (UserManager, error) {
+var DefaultUserHandler = func(config *Config, logger *log.Logger) (UserManager, users.Sessions, error) {
 	dbConfig, ok := config.UserConfig.(*DbConfig)
 	if !ok {
-		return nil, errors.New("arguments of UserConfig isn't DbConfig")
+		return nil, nil, errors.New("arguments of UserConfig isn't DbConfig")
 	}
 
 	db, err := sql.Open(dbConfig.DbType, dbConfig.DbURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	noClose := false
@@ -29,23 +29,23 @@ var DefaultUserHandler = func(config *Config, logger *log.Logger) (UserManager, 
 	params, _ := config.AuthConfig.(map[string]interface{})
 	verify, err := users.ReadVerify(params)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	userManager, err := users.DefaultUserManager(db, dbConfig, verify, config.ExternalVerify)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	userManager.(interface {
 		SetUserNotFound(userNotFound UserNotFound)
 	}).SetUserNotFound(config.UserNotFound)
 	online, err := users.CreateDbSession(db, dbConfig)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	userManager = users.OnlineWrap(userManager, online, config.LoginConflict, logger)
 	userManager = users.FailCounterWrap(userManager, config.MaxLoginFailCount, logger)
 	noClose = true
-	return userManager, nil
+	return userManager, online, nil
 }

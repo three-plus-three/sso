@@ -20,17 +20,30 @@ type SessionInfo struct {
 }
 
 type Sessions interface {
-	Login(userid int64, loginInfo *LoginInfo) (string, error)
+	Login(userid interface{}, address, service string) (string, error)
 	Logout(key string) error
 
 	Query(username string) ([]SessionInfo, error)
 }
 
+type EmptySessions struct{}
+
+func (sess EmptySessions) Login(userid interface{}, address, service string) (string, error) {
+	return "", nil
+}
+func (sess EmptySessions) Logout(key string) error {
+	return nil
+}
+func (sess EmptySessions) Query(username string) ([]SessionInfo, error) {
+	return nil, nil
+}
+
 type dbOnline struct {
-	db        *sql.DB
-	querySQL  string
-	insertSQL string
-	deleteSQL string
+	db               *sql.DB
+	querySQL         string
+	queryByUserIDSQL string
+	insertSQL        string
+	deleteSQL        string
 }
 
 func (do *dbOnline) Query(username string) ([]SessionInfo, error) {
@@ -48,6 +61,10 @@ func (do *dbOnline) Query(username string) ([]SessionInfo, error) {
 	}
 	defer rows.Close()
 
+	return do.query(rows)
+}
+
+func (do *dbOnline) query(rows *sql.Rows) ([]SessionInfo, error) {
 	var onlineList = make([]SessionInfo, 0, 1)
 	for rows.Next() {
 		var info SessionInfo
@@ -76,9 +93,30 @@ func (do *dbOnline) Query(username string) ([]SessionInfo, error) {
 	return onlineList, nil
 }
 
-func (do *dbOnline) Login(userid int64, loginInfo *LoginInfo) (string, error) {
+func (do *dbOnline) Login(userid interface{}, address, service string) (string, error) {
+	rows, err := do.db.Query(do.queryByUserIDSQL, userid)
+	if err != sql.ErrNoRows {
+		return "", err
+	}
+	defer rows.Close()
+	sessionList, err := do.query(rows)
+	if err != sql.ErrNoRows {
+		return "", err
+	}
+
+	foundIdx := -1
+	for idx, ol := range sessionList {
+		if ol.Address == address {
+			foundIdx = idx
+			break
+		}
+	}
+	if foundIdx >= 0 {
+		return sessionList[foundIdx].UUID, nil
+	}
+
 	uuid := GenerateID()
-	_, err := do.db.Exec(do.insertSQL, userid, uuid, loginInfo.Address)
+	_, err = do.db.Exec(do.insertSQL, userid, uuid, address)
 	if err != nil {
 		return "", err
 	}
@@ -94,6 +132,9 @@ func CreateDbSession(db *sql.DB, config *DbConfig) (Sessions, error) {
 	querySQL := "SELECT ou.uuid, ou.user_id, users.username, users.username, ou.address, ou.created_at, ou.updated_at " +
 		"FROM online_users ou join users on ou.user_id = users.id WHERE " +
 		"(ou.updated_at + interval '1 hour') > now() AND users.username = ?"
+	queryByUserIDSQL := "SELECT ou.uuid, ou.user_id, users.username, users.username, ou.address, ou.created_at, ou.updated_at " +
+		"FROM online_users ou join users on ou.user_id = users.id WHERE " +
+		"(ou.updated_at + interval '1 hour') > now() AND users.id = ?"
 	insertSQL := "INSERT INTO online_users(uuid, user_id, address, created_at, updated_at) VALUES(?, ?, ?, now(), now())"
 	deleteSQL := "DELETE FROM online_users WHERE uuid = ?"
 
@@ -102,6 +143,12 @@ func CreateDbSession(db *sql.DB, config *DbConfig) (Sessions, error) {
 			return nil, errors.New("数据库配置中的 online.query 的值不是字符串")
 		} else if s != "" {
 			querySQL = s
+		}
+
+		if s, ok := stringWith(config.Params, "online.queryByUserID", ""); !ok {
+			return nil, errors.New("数据库配置中的 online.queryByUserID 的值不是字符串")
+		} else if s != "" {
+			queryByUserIDSQL = s
 		}
 
 		if s, ok := stringWith(config.Params, "online.insert", ""); !ok {
@@ -124,10 +171,11 @@ func CreateDbSession(db *sql.DB, config *DbConfig) (Sessions, error) {
 	}
 
 	return &dbOnline{
-		db:        db,
-		querySQL:  querySQL,
-		insertSQL: insertSQL,
-		deleteSQL: deleteSQL,
+		db:               db,
+		querySQL:         querySQL,
+		queryByUserIDSQL: queryByUserIDSQL,
+		insertSQL:        insertSQL,
+		deleteSQL:        deleteSQL,
 	}, nil
 }
 
