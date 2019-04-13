@@ -1,4 +1,4 @@
-package server
+package users
 
 import (
 	"errors"
@@ -60,11 +60,11 @@ func (m *signingMethodDefault) Sign(signingString string, key interface{}) (stri
 	return signingString, nil
 }
 
-func readVerify(config *Config) (func(string, string) error, error) {
+func ReadVerify(config interface{}) (func(password, excepted string) error, error) {
 	var signingMethod SigningMethod = methodDefault
 	var secretKey []byte
 
-	params, ok := config.AuthConfig.(map[string]interface{})
+	params, ok := config.(map[string]interface{})
 	if ok && params != nil {
 		if o, ok := params["passwordHashAlg"]; ok && o != nil {
 			s, ok := o.(string)
@@ -95,3 +95,12 @@ func readVerify(config *Config) (func(string, string) error, error) {
 		return signingMethod.Verify(password, excepted, secretKey)
 	}, nil
 }
+
+// if  verifyType != "" && verifyType != "builin" {
+// 	return u.externalVerify(verifyType, u.name, password)
+// }
+
+// exceptedPassword := u.Password()
+// if exceptedPassword == "" {
+// 	return ErrPasswordEmpty
+// }

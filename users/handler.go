@@ -1,4 +1,4 @@
-package server
+package users
 
 import (
 	"bufio"
@@ -13,39 +13,37 @@ import (
 	"github.com/three-plus-three/modules/netutil"
 )
 
+// DefaultUserManager 缺省 UserManager
+var DefaultUserManager = createUserManager
+
+// DbConfig 服务的数据库配置项
+type DbConfig struct {
+	DbType string
+	DbURL  string
+
+	Params map[string]interface{}
+}
+
 // LockedUser 被锁定的用户
 type LockedUser struct {
 	Name     string
 	LockedAt time.Time
 }
 
-// UserHandler 读用户配置的 Handler
-type UserHandler interface {
+// UserManager 读用户配置的 Handler
+type UserManager interface {
 	Read(username string) (User, error)
 	Lock(username string) error
 	Unlock(username string) error
 	Locked() ([]LockedUser, error)
+
+	FailCount(username string) int
+
+	Auth(u User, userinfo *UserInfo) error
 }
 
-type dbUserHandler struct {
-	db                   *sql.DB
-	externalVerify       VerifyFunc
-	verify               func(string, string) error
-	querySQL             string
-	lockSQL              string
-	unlockSQL            string
-	lockedSQL            string
-	userFieldName        string
-	passwordFieldName    string
-	whiteIPListFieldName string
-	lockedFieldName      string
-	lockedTimeExpires    time.Duration
-	lockedTimeLayout     string
-	caseIgnore           bool
-}
-
-func createDbUserHandler(config *Config) (UserHandler, error) {
-	userConfig, ok := config.UserConfig.(*DbConfig)
+func createUserManager(uConfig interface{}, verify func(string, string) error, externalVerify VerifyFunc) (UserManager, error) {
+	userConfig, ok := uConfig.(*DbConfig)
 	if !ok {
 		return nil, errors.New("arguments of UserConfig isn't DbConfig")
 	}
@@ -55,11 +53,12 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 		return nil, err
 	}
 
-	verify, err := readVerify(config)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
+	noClose := false
+	defer func() {
+		if !noClose {
+			db.Close()
+		}
+	}()
 
 	querySQL := "SELECT * FROM users WHERE username = ?"
 	lockSQL := ""
@@ -89,34 +88,29 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 		}
 
 		if s, ok := stringWith(userConfig.Params, "password", ""); !ok {
-			db.Close()
 			return nil, errors.New("数据库配置中的 password 的值不是字符串")
 		} else if s != "" {
 			passwordFieldName = s
 		}
 
 		if s, ok := stringWith(userConfig.Params, "white_address_list", ""); !ok {
-			db.Close()
 			return nil, errors.New("数据库配置中的 white_address_list 的值不是字符串")
 		} else if s != "" {
 			whiteIPListFieldName = s
 		}
 
 		if s, ok := stringWith(userConfig.Params, "locked_at", ""); !ok {
-			db.Close()
 			return nil, errors.New("数据库配置中的 locked_at 的值不是字符串")
 		} else if s != "" {
 			lockedFieldName = s
 
 			if s, ok := stringWith(userConfig.Params, "locked_format", ""); !ok {
-				db.Close()
 				return nil, errors.New("数据库配置中的 locked_format 的值不是字符串")
 			} else if s != "" {
 				lockedTimeLayout = s
 			}
 
 			if s, ok := stringWith(userConfig.Params, "locked_time_expires", ""); !ok {
-				db.Close()
 				return nil, errors.New("数据库配置中的 locked_time_expires 的值不是字符串")
 			} else if s != "" {
 				duration, err := time.ParseDuration(s)
@@ -128,28 +122,24 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 		}
 
 		if s, ok := stringWith(userConfig.Params, "querySQL", ""); !ok {
-			db.Close()
 			return nil, errors.New("数据库配置中的 querySQL 的值不是字符串")
 		} else if s != "" {
 			querySQL = s
 		}
 
 		if s, ok := stringWith(userConfig.Params, "lockSQL", ""); !ok {
-			db.Close()
 			return nil, errors.New("数据库配置中的 lockSQL 的值不是字符串")
 		} else if s != "" {
 			lockSQL = s
 		}
 
 		if s, ok := stringWith(userConfig.Params, "unlockSQL", ""); !ok {
-			db.Close()
 			return nil, errors.New("数据库配置中的 unlockSQL 的值不是字符串")
 		} else if s != "" {
 			unlockSQL = s
 		}
 
 		if s, ok := stringWith(userConfig.Params, "lockedSQL", ""); !ok {
-			db.Close()
 			return nil, errors.New("数据库配置中的 lockedSQL 的值不是字符串")
 		} else if s != "" {
 			lockedSQL = s
@@ -163,9 +153,10 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 		lockedSQL = ReplacePlaceholders(lockedSQL)
 	}
 
-	return &dbUserHandler{
+	noClose = true
+	return &userManager{
 		db:                   db,
-		externalVerify:       config.ExternalVerify,
+		externalVerify:       externalVerify,
 		verify:               verify,
 		querySQL:             querySQL,
 		lockSQL:              lockSQL,
@@ -181,18 +172,35 @@ func createDbUserHandler(config *Config) (UserHandler, error) {
 	}, nil
 }
 
-func (ah *dbUserHandler) toLockedUser(data map[string]interface{}) LockedUser {
+type userManager struct {
+	db                   *sql.DB
+	externalVerify       VerifyFunc
+	verify               func(string, string) error
+	querySQL             string
+	lockSQL              string
+	unlockSQL            string
+	lockedSQL            string
+	userFieldName        string
+	passwordFieldName    string
+	whiteIPListFieldName string
+	lockedFieldName      string
+	lockedTimeExpires    time.Duration
+	lockedTimeLayout     string
+	caseIgnore           bool
+}
+
+func (ah *userManager) toLockedUser(data map[string]interface{}) LockedUser {
 	username := fmt.Sprint(data[ah.userFieldName])
 	lockedAt, _ := ah.parseTime(data[ah.lockedFieldName])
 
 	return LockedUser{Name: username, LockedAt: lockedAt}
 }
 
-func (ah *dbUserHandler) parseTime(o interface{}) (time.Time, error) {
+func (ah *userManager) parseTime(o interface{}) (time.Time, error) {
 	switch v := o.(type) {
 	case []byte:
 		if len(v) != 0 {
-			lockedAt := parseTime(ah.lockedTimeLayout, string(v))
+			lockedAt := ParseTime(ah.lockedTimeLayout, string(v))
 			if lockedAt.IsZero() {
 				return time.Time{}, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %s", string(v))
 			}
@@ -200,7 +208,7 @@ func (ah *dbUserHandler) parseTime(o interface{}) (time.Time, error) {
 		}
 	case string:
 		if v != "" {
-			lockedAt := parseTime(ah.lockedTimeLayout, v)
+			lockedAt := ParseTime(ah.lockedTimeLayout, v)
 			if lockedAt.IsZero() {
 				return time.Time{}, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %s", o)
 			}
@@ -212,7 +220,7 @@ func (ah *dbUserHandler) parseTime(o interface{}) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("value of '"+ah.lockedFieldName+"' isn't time - %T:%v", o, o)
 }
 
-func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User, error) {
+func (ah *userManager) toUser(user string, data map[string]interface{}) (User, error) {
 	if ah.userFieldName != "" {
 		if o := data[ah.userFieldName]; o != nil {
 			s, ok := o.(string)
@@ -298,7 +306,7 @@ func (ah *dbUserHandler) toUser(user string, data map[string]interface{}) (User,
 	}, nil
 }
 
-func (ah *dbUserHandler) Read(username string) (User, error) {
+func (ah *userManager) Read(username string) (User, error) {
 	rows, err := ah.db.Query(ah.querySQL, username)
 	if err != nil {
 		if err != sql.ErrNoRows {
@@ -375,7 +383,7 @@ func (ah *dbUserHandler) Read(username string) (User, error) {
 	return users[0], nil
 }
 
-func (ah *dbUserHandler) Locked() ([]LockedUser, error) {
+func (ah *userManager) Locked() ([]LockedUser, error) {
 	rows, err := ah.db.Query(ah.lockedSQL)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -419,7 +427,7 @@ func (ah *dbUserHandler) Locked() ([]LockedUser, error) {
 	return users, nil
 }
 
-func (ah *dbUserHandler) Lock(username string) error {
+func (ah *userManager) Lock(username string) error {
 	if ah.lockSQL == "" {
 		return nil
 	}
@@ -438,7 +446,7 @@ func (ah *dbUserHandler) Lock(username string) error {
 	return nil
 }
 
-func (ah *dbUserHandler) Unlock(username string) error {
+func (ah *userManager) Unlock(username string) error {
 	if ah.unlockSQL == "" {
 		return nil
 	}
@@ -457,50 +465,10 @@ func (ah *dbUserHandler) Unlock(username string) error {
 	return nil
 }
 
-func parseTime(layout, s string) time.Time {
-	if layout != "" {
-		t, err := time.Parse(layout, s)
-		if err == nil {
-			return t
-		}
-	}
-
-	for _, layout := range []string{time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05.999999999Z07:00"} {
-		t, err := time.Parse(layout, s)
-		if err == nil {
-			return t
-		}
-	}
-	return time.Time{}
+func (ah *userManager) FailCount(username string) int {
+	return 0
 }
 
-// ReplacePlaceholders 将 sql 语句中的 ? 改成 $x 形式
-func ReplacePlaceholders(sql string) string {
-	buf := &bytes.Buffer{}
-	i := 0
-	for {
-		p := strings.Index(sql, "?")
-		if p == -1 {
-			break
-		}
-
-		if len(sql[p:]) > 1 && sql[p:p+2] == "??" { // escape ?? => ?
-			buf.WriteString(sql[:p])
-			buf.WriteString("?")
-			if len(sql[p:]) == 1 {
-				break
-			}
-			sql = sql[p+2:]
-		} else {
-			i++
-			buf.WriteString(sql[:p])
-			fmt.Fprintf(buf, "$%d", i)
-			sql = sql[p+1:]
-		}
-	}
-
-	buf.WriteString(sql)
-	return buf.String()
+func (ah *userManager) Auth(u User, userinfo *UserInfo) error {
+	return u.Auth(userinfo)
 }

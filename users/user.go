@@ -1,35 +1,61 @@
-package server
+package users
 
 import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"time"
 
 	"github.com/three-plus-three/modules/netutil"
 )
 
-var localAddressList, _ = net.LookupHost("localhost")
+type UserInfo struct {
+	Username   string `json:"username" xml:"username" form:"username" query:"username"`
+	Password   string `json:"password" xml:"password" form:"password" query:"password"`
+	Service    string `json:"service" xml:"service" form:"service" query:"service"`
+	ForceLogin string `json:"force,omitempty" xml:"force" form:"force" query:"force"`
 
-// DefaultUserHandler 缺省 UserHandler
-var DefaultUserHandler = createDbUserHandler
+	CaptchaKey   string `json:"captcha_key,omitempty" xml:"captcha_key" form:"captcha_key" query:"captcha_key"`
+	CaptchaValue string `json:"captcha_value,omitempty" xml:"captcha_value" form:"captcha_value" query:"captcha_value"`
 
-type User interface {
+	Address string
+}
+
+func (u *UserInfo) IsForce() bool {
+	return u.ForceLogin == "on" ||
+		u.ForceLogin == "true" ||
+		u.ForceLogin == "checked"
+}
+
+type InternalUser interface {
 	Name() string
-	Auth(address, password string) error
 	Data() map[string]interface{}
 }
 
+// VerifyFunc 用户验证回调类型，method 为扩展类型， inner 为数据库中保存的数据 userinfo 为界面上用户填写的
+type VerifyFunc func(method string, inner InternalUser, userinfo *UserInfo) error
+
+// UserNotFound 用户不存在时的回调
+type UserNotFound func(userinfo *UserInfo) (map[string]interface{}, error)
+
+var localAddressList, _ = net.LookupHost("localhost")
+
+type User interface {
+	InternalUser
+
+	Auth(info *UserInfo) error
+}
+
 type UserImpl struct {
-	externalVerify    VerifyFunc
 	verify            func(password, excepted string) error
+	externalVerify    VerifyFunc
 	name              string
 	password          string
 	lockedAt          time.Time
 	lockedTimeExpires time.Duration
 	ingressIPList     []netutil.IPChecker
 	data              map[string]interface{}
+	// failCount         int
 }
 
 func (u *UserImpl) Name() string {
@@ -40,22 +66,9 @@ func (u *UserImpl) Password() string {
 	return u.password
 }
 
-const (
-	HeaderXForwardedFor = "X-Forwarded-For"
-	HeaderXRealIP       = "X-Real-IP"
-)
-
-func RealIP(req *http.Request) string {
-	ra := req.RemoteAddr
-	if ip := req.Header.Get(HeaderXForwardedFor); ip != "" {
-		ra = ip
-	} else if ip := req.Header.Get(HeaderXRealIP); ip != "" {
-		ra = ip
-	} else {
-		ra, _, _ = net.SplitHostPort(ra)
-	}
-	return ra
-}
+// func (u *UserImpl) FailCount() int {
+// 	return u.failCount
+// }
 
 func (u *UserImpl) isValid(currentAddr string) (bool, error) {
 	if len(u.ingressIPList) != 0 {
@@ -105,8 +118,8 @@ func (u *UserImpl) Data() map[string]interface{} {
 	return u.data
 }
 
-func (u *UserImpl) Auth(address, password string) error {
-	ok, err := u.isValid(address)
+func (u *UserImpl) Auth(userinfo *UserInfo) error {
+	ok, err := u.isValid(userinfo.Address)
 	if err != nil {
 		return err
 	}
@@ -114,12 +127,13 @@ func (u *UserImpl) Auth(address, password string) error {
 		return errors.New("user is inused")
 	}
 
-	if u.externalVerify != nil {
-		if typ := u.data["source"]; typ != nil {
-			if verifyType := fmt.Sprint(typ); verifyType != "" && verifyType != "builin" {
-				return u.externalVerify(verifyType, u.name, password)
-			}
-		}
+	var method string
+	if typ := u.data["source"]; typ != nil {
+		method = fmt.Sprint(typ)
+	}
+
+	if method != "" && method != "builin" {
+		return u.externalVerify(method, u, userinfo)
 	}
 
 	exceptedPassword := u.Password()
@@ -127,7 +141,7 @@ func (u *UserImpl) Auth(address, password string) error {
 		return ErrPasswordEmpty
 	}
 
-	err = u.verify(password, exceptedPassword)
+	err = u.verify(userinfo.Password, exceptedPassword)
 	if err != nil {
 		if err == ErrSignatureInvalid {
 			return ErrPasswordNotMatch

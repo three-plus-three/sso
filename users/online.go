@@ -1,4 +1,4 @@
-package server
+package users
 
 import (
 	"database/sql"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 )
+
+var DefaultOnlineHandler = onlineHandler
 
 type OnlineInfo struct {
 	Address   string
@@ -60,8 +62,6 @@ func onlineHandler(params interface{}) (Online, error) {
 
 	return createEmptyOnline(params)
 }
-
-var DefaultOnlineHandler = onlineHandler
 
 type dbOnline struct {
 	db             *sql.DB
@@ -280,21 +280,4 @@ func (nt NullTime) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return nt.Time, nil
-}
-
-func stringWith(params map[string]interface{}, key, defaultValue string) (string, bool) {
-	o, ok := params[key]
-	if !ok || o == nil {
-		return defaultValue, true
-	}
-
-	s, ok := o.(string)
-	if !ok {
-		return "", false
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return defaultValue, true
-	}
-	return s, true
 }

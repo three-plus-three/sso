@@ -193,10 +193,10 @@ func (c *Client) NewTicket(username, password string, force bool) (*Ticket, erro
 		if len(bs) != 0 {
 			txt := string(bs)
 
-			if txt == `{"message":"user isn't found"}` {
+			if strings.Contains(txt, `{"message":"user isn't found"}`) {
 				return nil, ErrUserNotFound
 			}
-			if txt == `{"message":"password isn't match"}` {
+			if strings.Contains(txt, `{"message":"password isn't match"}`) {
 				return nil, ErrPasswordNotMatch
 			}
 

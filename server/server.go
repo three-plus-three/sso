@@ -20,46 +20,47 @@ import (
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	"github.com/mojocn/base64Captcha"
+	"github.com/three-plus-three/sso/users"
 )
 
 var (
 	isDebug = os.Getenv("IsSSODebug") == "true"
 
 	// ErrUsernameEmpty 用户名为空
-	ErrUsernameEmpty = echo.NewHTTPError(http.StatusUnauthorized, "user name is empty")
+	ErrUsernameEmpty = users.ErrUsernameEmpty
 
 	// ErrPasswordEmpty 密码为空
-	ErrPasswordEmpty = echo.NewHTTPError(http.StatusUnauthorized, "user password is empty")
+	ErrPasswordEmpty = users.ErrPasswordEmpty
 
 	// ErrUserNotFound 用户未找到
-	ErrUserNotFound = echo.NewHTTPError(http.StatusUnauthorized, "user isn't found")
+	ErrUserNotFound = users.ErrUserNotFound
 
 	// ErrPasswordNotMatch 密码不正确
-	ErrPasswordNotMatch = echo.NewHTTPError(http.StatusUnauthorized, "password isn't match")
+	ErrPasswordNotMatch = users.ErrPasswordNotMatch
 
 	// ErrMutiUsers 找到多个用户
-	ErrMutiUsers = echo.NewHTTPError(http.StatusUnauthorized, "muti users is found")
+	ErrMutiUsers = users.ErrMutiUsers
 
 	// ErrUserLocked 用户已被锁定
-	ErrUserLocked = echo.NewHTTPError(http.StatusUnauthorized, "user is locked")
+	ErrUserLocked = users.ErrUserLocked
 
 	// ErrUserIPBlocked 用户不在指定的 IP 范围登录
-	ErrUserIPBlocked = echo.NewHTTPError(http.StatusUnauthorized, "user address is blocked")
+	ErrUserIPBlocked = users.ErrUserIPBlocked
 
 	// ErrServiceTicketNotFound Service ticket 没有找到
-	ErrServiceTicketNotFound = echo.NewHTTPError(http.StatusUnauthorized, "service ticket isn't found")
+	ErrServiceTicketNotFound = users.ErrServiceTicketNotFound
 
 	// ErrServiceTicketExpired Service ticket 已过期
-	ErrServiceTicketExpired = echo.NewHTTPError(http.StatusUnauthorized, "service ticket isn't expired")
+	ErrServiceTicketExpired = users.ErrServiceTicketExpired
 
 	// ErrUnauthorizedService Service 是未授权的
-	ErrUnauthorizedService = echo.NewHTTPError(http.StatusUnauthorized, "service is unauthorized")
+	ErrUnauthorizedService = users.ErrUnauthorizedService
 
 	// ErrUserAlreadyOnline 用户已登录
-	ErrUserAlreadyOnline = echo.NewHTTPError(http.StatusUnauthorized, "user is already online")
+	ErrUserAlreadyOnline = users.ErrUserAlreadyOnline
 
 	// ErrPermissionDenied 没有权限
-	ErrPermissionDenied = echo.NewHTTPError(http.StatusUnauthorized, "permission is denied")
+	ErrPermissionDenied = users.ErrPermissionDenied
 )
 
 type ErrExternalServer struct {
@@ -78,11 +79,18 @@ func IsErrExternalServer(e error) bool {
 // TicketGetter 从请求中获取票据
 type TicketGetter func(c echo.Context) string
 
-// UserNotFound 用户不存在时的回调
-type UserNotFound func(address, username, password string) (map[string]interface{}, error)
+type VerifyFunc = users.VerifyFunc
 
-// VerifyFunc 用户验证回调类型，method 为扩展类型， username, password 为界面上用户填写的
-type VerifyFunc func(method, username, password string) error
+type UserNotFound = users.UserNotFound
+
+// DbConfig 服务的数据库配置项
+type DbConfig = users.DbConfig
+
+type OnlineInfo = users.OnlineInfo
+type User = users.User
+type LockedUser = users.LockedUser
+type UserManager = users.UserManager
+type Online = users.Online
 
 // Config 服务的配置项
 type Config struct {
@@ -108,23 +116,16 @@ type Config struct {
 	RedirectMode      string
 	CookiesForLogout  []*http.Cookie
 
-	LoginConflict  string
-	ListenAt       string
-	UserConfig     interface{}
+	LoginConflict string
+	ListenAt      string
+	UserConfig    interface{}
+	AuthConfig    interface{}
+
 	UserNotFound   UserNotFound
-	AuthConfig     interface{}
 	ExternalVerify VerifyFunc
 	TicketLookup   string
 	TicketProtocol string
 	TicketConfig   map[string]interface{}
-}
-
-// DbConfig 服务的数据库配置项
-type DbConfig struct {
-	DbType string
-	DbURL  string
-
-	Params map[string]interface{}
 }
 
 // CreateServer 创建一个 sso 服务
@@ -174,21 +175,25 @@ func CreateServer(config *Config) (*Server, error) {
 		}
 	}
 
-	if DefaultUserHandler == nil {
-		DefaultUserHandler = createDbUserHandler
-	}
+	// UserConfig     interface{}
+	// AuthConfig     interface{}
 
-	userHandler, err := DefaultUserHandler(config)
+	verify, err := users.ReadVerify(config.AuthConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	online, err := DefaultOnlineHandler(config.UserConfig)
+	userManager, err := users.DefaultUserManager(config.UserConfig, verify, config.ExternalVerify)
 	if err != nil {
 		return nil, err
 	}
 
-	// authenticationHandler, err := DefaultAuthenticationHandler(userHandler, config.AuthConfig)
+	online, err := users.DefaultOnlineHandler(config.UserConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// authenticationHandler, err := DefaultAuthenticationHandler(userManager, config.AuthConfig)
 	// if err != nil {
 	// 	return nil, err
 	// }
@@ -236,7 +241,7 @@ func CreateServer(config *Config) (*Server, error) {
 		welcomeURL:        config.WelcomeURL,
 		loginConflict:     config.LoginConflict,
 		online:            online,
-		userHandler:       userHandler,
+		userManager:       userManager,
 		userNotFound:      config.UserNotFound,
 		tokenName:         tokenName,
 		maxLoginFailCount: config.MaxLoginFailCount,
@@ -246,8 +251,7 @@ func CreateServer(config *Config) (*Server, error) {
 			timeout: 1 * time.Minute,
 			tickets: map[string]*authenticatingTicket{},
 		},
-		failCounter: createFailCounter(),
-		logger:      log.New(os.Stderr, "[sso] ", log.LstdFlags|log.Lshortfile),
+		logger: log.New(os.Stderr, "[sso] ", log.LstdFlags|log.Lshortfile),
 		redirect: func(c echo.Context, toURL string) error {
 			return c.Redirect(http.StatusTemporaryRedirect, toURL)
 		},
@@ -326,13 +330,12 @@ type Server struct {
 	tokenName             string
 	loginConflict         string
 	maxLoginFailCount     int
-	userHandler           UserHandler
+	userManager           UserManager
 	userNotFound          UserNotFound
 	online                Online
 	tickets               TicketHandler
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
-	failCounter           FailCounter
 	logger                *log.Logger
 	captcha               interface{}
 	redirect              func(c echo.Context, url string) error
@@ -465,24 +468,6 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	srv.engine.ServeHTTP(w, r)
 }
 
-type userLogin struct {
-	Username   string `json:"username" xml:"username" form:"username" query:"username"`
-	Password   string `json:"password" xml:"password" form:"password" query:"password"`
-	Service    string `json:"service" xml:"service" form:"service" query:"service"`
-	ForceLogin string `json:"force,omitempty" xml:"force" form:"force" query:"force"`
-
-	CaptchaKey   string `json:"captcha_key,omitempty" xml:"captcha_key" form:"captcha_key" query:"captcha_key"`
-	CaptchaValue string `json:"captcha_value,omitempty" xml:"captcha_value" form:"captcha_value" query:"captcha_value"`
-
-	//LoginFailCount int    `json:"login_fail_count,omitempty" xml:"login_fail_count" form:"login_fail_count" query:"login_fail_count"`
-}
-
-func (ul *userLogin) isForce() bool {
-	return ul.ForceLogin == "on" ||
-		ul.ForceLogin == "true" ||
-		ul.ForceLogin == "checked"
-}
-
 func (srv *Server) lockedUsers(c echo.Context) error {
 	ticketString := srv.ticketGetter(c)
 	if ticketString == "" {
@@ -498,7 +483,7 @@ func (srv *Server) lockedUsers(c echo.Context) error {
 }
 
 func (srv *Server) lockedUsersWithError(c echo.Context, unlocked error) error {
-	users, err := srv.userHandler.Locked()
+	users, err := srv.userManager.Locked()
 	data := map[string]interface{}{"global": srv.data,
 		"users": users}
 	if err != nil {
@@ -523,10 +508,7 @@ func (srv *Server) userUnlock(c echo.Context) error {
 	}
 
 	username := c.QueryParam("username")
-	err = srv.userHandler.Unlock(username)
-	if err == nil {
-		srv.failCounter.Zero(username)
-	}
+	err = srv.userManager.Unlock(username)
 	return srv.lockedUsersWithError(c, err)
 }
 
@@ -559,7 +541,7 @@ func (srv *Server) loginGet(c echo.Context) error {
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
-func (srv *Server) relogin(c echo.Context, user userLogin, message string, err error) error {
+func (srv *Server) relogin(c echo.Context, user users.UserInfo, message string, err error) error {
 	if ErrUserIPBlocked == err {
 		message = "用户不能在该地址访问"
 	} else if err == ErrUserLocked {
@@ -583,7 +565,7 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 		"errorMessage": message,
 	}
 
-	if count := srv.failCounter.Count(user.Username); count > 0 {
+	if count := srv.userManager.FailCount(user.Username); count > 0 {
 		captchaID := "" // time.Now().Format(time.RFC3339Nano)
 		data["captcha_id"] = captchaID
 		captchaKey, captchaCode := base64Captcha.GenerateCaptcha(captchaID, srv.captcha)
@@ -597,7 +579,7 @@ func (srv *Server) relogin(c echo.Context, user userLogin, message string, err e
 	return c.Render(http.StatusOK, "login.html", data)
 }
 
-func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user userLogin, onlineList []OnlineInfo) error {
+func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user users.UserInfo, onlineList []OnlineInfo) error {
 	if len(onlineList) == 1 {
 		if !isConsumeJSON(c) {
 			return srv.relogin(c, user, "用户已在 "+onlineList[0].Address+
@@ -617,18 +599,8 @@ func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, user userLogin, onlin
 	return ErrUserAlreadyOnline
 }
 
-func (srv *Server) lockUserIfNeed(c echo.Context, user userLogin) {
-	srv.failCounter.Fail(user.Username)
-	var failCount = srv.failCounter.Count(user.Username)
-	if failCount > srv.maxLoginFailCount && "admin" != user.Username {
-		if err := srv.userHandler.Lock(user.Username); err != nil {
-			srv.logger.Println("lock", user.Username, "fail,", err)
-		}
-	}
-}
-
 func (srv *Server) login(c echo.Context) error {
-	var user userLogin
+	var user users.UserInfo
 	if err := c.Bind(&user); err != nil {
 		srv.logger.Println("登录数据的格式不正确 -", err)
 
@@ -649,7 +621,7 @@ func (srv *Server) login(c echo.Context) error {
 		return srv.relogin(c, user, "请输入用户名", nil)
 	}
 
-	if count := srv.failCounter.Count(user.Username); count > 0 {
+	if count := srv.userManager.FailCount(user.Username); count > 0 {
 		if user.CaptchaKey == "" || user.CaptchaValue == "" {
 			if isConsumeJSON(c) {
 				return c.String(http.StatusUnauthorized, "请输入验证码")
@@ -667,7 +639,7 @@ func (srv *Server) login(c echo.Context) error {
 		}
 	}
 
-	var isForce = user.isForce()
+	var isForce = user.IsForce()
 	switch srv.loginConflict {
 	case "force":
 		isForce = true
@@ -677,34 +649,34 @@ func (srv *Server) login(c echo.Context) error {
 	default:
 	}
 
-	hostAddress := c.RealIP()
-	if !isForce && hostAddress != "127.0.0.1" {
+	user.Address = c.RealIP()
+	if !isForce && user.Address != "127.0.0.1" {
 		// 判断用户是不是已经在其它主机上登录
 		if onlineList, err := srv.online.Query(user.Username); err != nil {
 			if !isConsumeJSON(c) {
 				return srv.relogin(c, user, err.Error(), err)
 			}
 			return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
-		} else if len(onlineList) != 0 && !IsOnlined(onlineList, hostAddress) {
+		} else if len(onlineList) != 0 && !users.IsOnlined(onlineList, user.Address) {
 			return srv.alreadyLoginOnOtherHost(c, user, onlineList)
 		}
 	}
 
 	var userData map[string]interface{}
 
-	auth, err := srv.userHandler.Read(user.Username)
+	auth, err := srv.userManager.Read(user.Username)
 	if err != nil || auth == nil {
 		if err == nil {
 			err = ErrUserNotFound
 		}
 		if ErrUserNotFound == err && srv.userNotFound != nil {
-			userData, err = srv.userNotFound(hostAddress, user.Username, user.Password)
+			userData, err = srv.userNotFound(&user)
 			if userData == nil && err == nil {
 				err = ErrUserNotFound
 			} else if userData != nil {
-				u, _ := stringWith(userData, "user", "")
+				u, _ := users.StringWith(userData, "user", "")
 				if u == "" {
-					u, _ = stringWith(userData, "username", "")
+					u, _ = users.StringWith(userData, "username", "")
 				}
 				if u != "" {
 					user.Username = u
@@ -712,7 +684,7 @@ func (srv *Server) login(c echo.Context) error {
 			}
 		}
 	} else {
-		err = auth.Auth(hostAddress, user.Password)
+		err = srv.userManager.Auth(auth, &user)
 		if err == nil {
 			userData = auth.Data()
 			user.Username = auth.Name()
@@ -721,11 +693,6 @@ func (srv *Server) login(c echo.Context) error {
 
 	if err != nil {
 		srv.logger.Println("用户授权失败 -", err)
-
-		// auth == nil 是说明不是用户，不必计数
-		if auth != nil && err == ErrPasswordNotMatch {
-			srv.lockUserIfNeed(c, user)
-		}
 
 		if !isConsumeJSON(c) {
 			return srv.relogin(c, user, "", err)
@@ -747,7 +714,6 @@ func (srv *Server) login(c echo.Context) error {
 		}
 		return echo.ErrUnauthorized
 	}
-	srv.failCounter.Zero(user.Username)
 
 	ticket, err := srv.tickets.NewTicket(user.Username, userData)
 	if err != nil {
