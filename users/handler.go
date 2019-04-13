@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/three-plus-three/modules/netutil"
+	"github.com/three-plus-three/sso/users"
 )
 
 // DefaultUserManager 缺省 UserManager
@@ -169,6 +170,29 @@ type userManager struct {
 	lockedTimeExpires    time.Duration
 	lockedTimeLayout     string
 	caseIgnore           bool
+}
+
+func (ah *userManager) SetUserNotFound(userNotFound UserNotFound) {
+	ah.userNotFound = userNotFound
+}
+
+func (ah *userManager) UserNotFound(userinfo *UserInfo) (map[string]interface{}, error) {
+	if ah.userNotFound != nil {
+		userData, err := ah.userNotFound(userinfo)
+		if err != nil {
+			return nil, err
+		}
+		if userData != nil {
+			u, _ := users.StringWith(userData, "user", "")
+			if u == "" {
+				u, _ = users.StringWith(userData, "username", "")
+			}
+			if u != "" {
+				userinfo.Username = u
+			}
+		}
+	}
+	return nil, nil
 }
 
 func (ah *userManager) toLockedUser(data map[string]interface{}) LockedUser {
@@ -455,4 +479,19 @@ func (ah *userManager) FailCount(username string) int {
 
 func (ah *userManager) Auth(u User, userinfo *UserInfo) error {
 	return u.Auth(userinfo)
+}
+
+func Auth(um UserManager, userinfo *UserInfo) (User, error) {
+	auth, err := um.Read(userinfo)
+	if err != nil {
+		return nil, err
+	}
+
+	err = um.Auth(auth, &user)
+	if err == nil {
+		userData = auth.Data()
+		user.Username = auth.Name()
+	}
+
+	return auth, err
 }

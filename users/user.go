@@ -27,7 +27,7 @@ func (u *UserInfo) IsForce() bool {
 		u.ForceLogin == "checked"
 }
 
-type InternalUser interface {
+type User interface {
 	Name() string
 	Data() map[string]interface{}
 }
@@ -39,12 +39,6 @@ type VerifyFunc func(method string, inner InternalUser, userinfo *UserInfo) erro
 type UserNotFound func(userinfo *UserInfo) (map[string]interface{}, error)
 
 var localAddressList, _ = net.LookupHost("localhost")
-
-type User interface {
-	InternalUser
-
-	Auth(info *UserInfo) error
-}
 
 type UserImpl struct {
 	verify            func(password, excepted string) error

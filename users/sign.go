@@ -60,12 +60,11 @@ func (m *signingMethodDefault) Sign(signingString string, key interface{}) (stri
 	return signingString, nil
 }
 
-func ReadVerify(config interface{}) (func(password, excepted string) error, error) {
+func ReadVerify(params map[string]interface{}) (func(password, excepted string) error, error) {
 	var signingMethod SigningMethod = methodDefault
 	var secretKey []byte
 
-	params, ok := config.(map[string]interface{})
-	if ok && params != nil {
+	if params != nil {
 		if o, ok := params["passwordHashAlg"]; ok && o != nil {
 			s, ok := o.(string)
 			if !ok {

@@ -178,22 +178,10 @@ func CreateServer(config *Config) (*Server, error) {
 	// UserConfig     interface{}
 	// AuthConfig     interface{}
 
-	verify, err := users.ReadVerify(config.AuthConfig)
+	userManager, err := DefaultUserHandler(config, logger)
 	if err != nil {
 		return nil, err
 	}
-
-	userManager, err := users.DefaultUserManager(config.UserConfig, verify, config.ExternalVerify)
-	if err != nil {
-		return nil, err
-	}
-	userManager = users.FailCounterWrap(userManager, config.MaxLoginFailCount, logger)
-
-	online, err := users.DefaultOnlineHandler(config.UserConfig)
-	if err != nil {
-		return nil, err
-	}
-	userManager = users.OnlineWrap(userManager, online, config.LoginConflict, logger)
 
 	factory := TicketHandlerFactories[config.TicketProtocol]
 	if factory == nil {
@@ -237,7 +225,6 @@ func CreateServer(config *Config) (*Server, error) {
 		urlPrefix:      config.URLPrefix,
 		welcomeURL:     config.WelcomeURL,
 		userManager:    userManager,
-		userNotFound:   config.UserNotFound,
 		tokenName:      tokenName,
 		ticketGetter:   ticketGetter,
 		tickets:        ticketHandler,
@@ -634,32 +621,13 @@ func (srv *Server) login(c echo.Context) error {
 
 	var userData map[string]interface{}
 
-	auth, err := srv.userManager.Read(&user)
+	auth, err := users.Auth(srv.userManager, &user)
 	if err != nil || auth == nil {
 		if err == nil {
 			err = ErrUserNotFound
 		}
-		if ErrUserNotFound == err && srv.userNotFound != nil {
-			userData, err = srv.userNotFound(&user)
-			if userData == nil && err == nil {
-				err = ErrUserNotFound
-			} else if userData != nil {
-				u, _ := users.StringWith(userData, "user", "")
-				if u == "" {
-					u, _ = users.StringWith(userData, "username", "")
-				}
-				if u != "" {
-					user.Username = u
-				}
-			}
-		} else if onlineList, ok := users.IsOnlinedError(err); ok {
+		if onlineList, ok := users.IsOnlinedError(err); ok {
 			return srv.alreadyLoginOnOtherHost(c, user, onlineList)
-		}
-	} else {
-		err = srv.userManager.Auth(auth, &user)
-		if err == nil {
-			userData = auth.Data()
-			user.Username = auth.Name()
 		}
 	}
 
