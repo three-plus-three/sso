@@ -86,11 +86,9 @@ type UserNotFound = users.UserNotFound
 // DbConfig 服务的数据库配置项
 type DbConfig = users.DbConfig
 
-type OnlineInfo = users.OnlineInfo
 type User = users.User
 type LockedUser = users.LockedUser
 type UserManager = users.UserManager
-type Online = users.Online
 
 // Config 服务的配置项
 type Config struct {
@@ -175,6 +173,8 @@ func CreateServer(config *Config) (*Server, error) {
 		}
 	}
 
+	logger := log.New(os.Stderr, "[sso] ", log.LstdFlags|log.Lshortfile)
+
 	// UserConfig     interface{}
 	// AuthConfig     interface{}
 
@@ -187,16 +187,13 @@ func CreateServer(config *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	userManager = users.FailCounterWrap(userManager, config.MaxLoginFailCount, logger)
 
 	online, err := users.DefaultOnlineHandler(config.UserConfig)
 	if err != nil {
 		return nil, err
 	}
-
-	// authenticationHandler, err := DefaultAuthenticationHandler(userManager, config.AuthConfig)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	userManager = users.OnlineWrap(userManager, online, config.LoginConflict, logger)
 
 	factory := TicketHandlerFactories[config.TicketProtocol]
 	if factory == nil {
@@ -231,27 +228,24 @@ func CreateServer(config *Config) (*Server, error) {
 			return c.QueryParam("_method")
 		}}))
 	srv := &Server{
-		engine:            e,
-		cookieDomain:      config.CookieDomain,
-		cookiePath:        config.CookiePath,
-		cookieSecure:      config.CookieSecure,
-		cookieHTTPOnly:    config.CookieHTTPOnly,
-		theme:             config.Theme,
-		urlPrefix:         config.URLPrefix,
-		welcomeURL:        config.WelcomeURL,
-		loginConflict:     config.LoginConflict,
-		online:            online,
-		userManager:       userManager,
-		userNotFound:      config.UserNotFound,
-		tokenName:         tokenName,
-		maxLoginFailCount: config.MaxLoginFailCount,
-		ticketGetter:      ticketGetter,
-		tickets:           ticketHandler,
+		engine:         e,
+		cookieDomain:   config.CookieDomain,
+		cookiePath:     config.CookiePath,
+		cookieSecure:   config.CookieSecure,
+		cookieHTTPOnly: config.CookieHTTPOnly,
+		theme:          config.Theme,
+		urlPrefix:      config.URLPrefix,
+		welcomeURL:     config.WelcomeURL,
+		userManager:    userManager,
+		userNotFound:   config.UserNotFound,
+		tokenName:      tokenName,
+		ticketGetter:   ticketGetter,
+		tickets:        ticketHandler,
 		authenticatingTickets: authenticatingTickets{
 			timeout: 1 * time.Minute,
 			tickets: map[string]*authenticatingTicket{},
 		},
-		logger: log.New(os.Stderr, "[sso] ", log.LstdFlags|log.Lshortfile),
+		logger: logger,
 		redirect: func(c echo.Context, toURL string) error {
 			return c.Redirect(http.StatusTemporaryRedirect, toURL)
 		},
@@ -328,11 +322,8 @@ type Server struct {
 	urlPrefix             string
 	welcomeURL            string
 	tokenName             string
-	loginConflict         string
-	maxLoginFailCount     int
 	userManager           UserManager
 	userNotFound          UserNotFound
-	online                Online
 	tickets               TicketHandler
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
@@ -573,7 +564,7 @@ func (srv *Server) relogin(c echo.Context, user users.UserInfo, message string, 
 		data["captcha_key"] = captchaKey
 	}
 
-	if err == ErrUserAlreadyOnline && (srv.loginConflict == "auto" || srv.loginConflict == "") {
+	if err == ErrUserAlreadyOnline {
 		data["showForce"] = true
 	}
 	return c.Render(http.StatusOK, "login.html", data)
@@ -639,32 +630,11 @@ func (srv *Server) login(c echo.Context) error {
 		}
 	}
 
-	var isForce = user.IsForce()
-	switch srv.loginConflict {
-	case "force":
-		isForce = true
-	case "", "auto":
-	case "disableForce":
-		isForce = false
-	default:
-	}
-
 	user.Address = c.RealIP()
-	if !isForce && user.Address != "127.0.0.1" {
-		// 判断用户是不是已经在其它主机上登录
-		if onlineList, err := srv.online.Query(user.Username); err != nil {
-			if !isConsumeJSON(c) {
-				return srv.relogin(c, user, err.Error(), err)
-			}
-			return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
-		} else if len(onlineList) != 0 && !users.IsOnlined(onlineList, user.Address) {
-			return srv.alreadyLoginOnOtherHost(c, user, onlineList)
-		}
-	}
 
 	var userData map[string]interface{}
 
-	auth, err := srv.userManager.Read(user.Username)
+	auth, err := srv.userManager.Read(&user)
 	if err != nil || auth == nil {
 		if err == nil {
 			err = ErrUserNotFound
@@ -682,6 +652,8 @@ func (srv *Server) login(c echo.Context) error {
 					user.Username = u
 				}
 			}
+		} else if onlineList, ok := users.IsOnlinedError(err); ok {
+			return srv.alreadyLoginOnOtherHost(c, user, onlineList)
 		}
 	} else {
 		err = srv.userManager.Auth(auth, &user)

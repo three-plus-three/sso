@@ -12,8 +12,8 @@ type failCounterWrapper struct {
 	maxLoginFailCount int
 }
 
-func (fcw *failCounterWrapper) Read(username string) (User, error) {
-	return fcw.inner.Read(username)
+func (fcw *failCounterWrapper) Read(userinfo *UserInfo) (User, error) {
+	return fcw.inner.Read(userinfo)
 }
 
 func (fcw *failCounterWrapper) Lock(username string) error {

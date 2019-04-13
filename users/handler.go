@@ -32,7 +32,7 @@ type LockedUser struct {
 
 // UserManager 读用户配置的 Handler
 type UserManager interface {
-	Read(username string) (User, error)
+	Read(userinfo *UserInfo) (User, error)
 	Lock(username string) error
 	Unlock(username string) error
 	Locked() ([]LockedUser, error)
@@ -42,24 +42,7 @@ type UserManager interface {
 	Auth(u User, userinfo *UserInfo) error
 }
 
-func createUserManager(uConfig interface{}, verify func(string, string) error, externalVerify VerifyFunc) (UserManager, error) {
-	userConfig, ok := uConfig.(*DbConfig)
-	if !ok {
-		return nil, errors.New("arguments of UserConfig isn't DbConfig")
-	}
-
-	db, err := sql.Open(userConfig.DbType, userConfig.DbURL)
-	if err != nil {
-		return nil, err
-	}
-
-	noClose := false
-	defer func() {
-		if !noClose {
-			db.Close()
-		}
-	}()
-
+func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, string) error, externalVerify VerifyFunc) (UserManager, error) {
 	querySQL := "SELECT * FROM users WHERE username = ?"
 	lockSQL := ""
 	unlockSQL := ""
@@ -153,7 +136,6 @@ func createUserManager(uConfig interface{}, verify func(string, string) error, e
 		lockedSQL = ReplacePlaceholders(lockedSQL)
 	}
 
-	noClose = true
 	return &userManager{
 		db:                   db,
 		externalVerify:       externalVerify,
@@ -306,7 +288,8 @@ func (ah *userManager) toUser(user string, data map[string]interface{}) (User, e
 	}, nil
 }
 
-func (ah *userManager) Read(username string) (User, error) {
+func (ah *userManager) Read(userinfo *UserInfo) (User, error) {
+	username := userinfo.Username
 	rows, err := ah.db.Query(ah.querySQL, username)
 	if err != nil {
 		if err != sql.ErrNoRows {
@@ -372,7 +355,8 @@ func (ah *userManager) Read(username string) (User, error) {
 
 		lowerUser := strings.ToLower(username)
 		if lowerUser != username {
-			return ah.Read(lowerUser)
+			userinfo.Username = lowerUser
+			return ah.Read(userinfo)
 		}
 		return nil, nil
 	}

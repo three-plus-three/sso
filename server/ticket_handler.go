@@ -9,6 +9,7 @@ import (
 
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo"
+	"github.com/three-plus-three/sso/users"
 )
 
 // Ticket 票据对象
@@ -172,7 +173,7 @@ func (jh *jwtTicketHandler) NewTicket(username string, data map[string]interface
 	ticketObject := &Ticket{
 		Ticket:    t,
 		Username:  username,
-		SessionID: GenerateID(),
+		SessionID: users.GenerateID(),
 		ExpiresAt: expiredAt,
 		IssuedAt:  issuedAt,
 		Data:      res,

@@ -103,6 +103,7 @@ CREATE TABLE ` + table + ` (
 
 DROP TABLE IF EXISTS ` + online_table + ` CASCADE;
 CREATE TABLE ` + online_table + ` (
+  uuid           VARCHAR(50) PRIMARY KEY,
   user_id        int PRIMARY KEY references ` + table + `(id),
   address        VARCHAR(30) NOT NULL,
 

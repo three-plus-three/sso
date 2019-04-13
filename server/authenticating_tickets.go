@@ -3,6 +3,8 @@ package server
 import (
 	"sync"
 	"time"
+
+	"github.com/three-plus-three/sso/users"
 )
 
 type authenticatingTicket struct {
@@ -20,7 +22,7 @@ type authenticatingTickets struct {
 
 func (at *authenticatingTickets) new(ticket *Ticket, service string) string {
 	t := &authenticatingTicket{
-		ID:        "ST-" + GenerateID(),
+		ID:        "ST-" + users.GenerateID(),
 		Service:   service,
 		Ticket:    ticket,
 		CreatedAt: time.Now(),

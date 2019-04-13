@@ -43,3 +43,25 @@ var (
 	// ErrPermissionDenied 没有权限
 	ErrPermissionDenied = echo.NewHTTPError(http.StatusUnauthorized, "permission is denied")
 )
+
+type ErrOnline struct {
+	onlineList []SessionInfo
+}
+
+func (err *ErrOnline) Error() string {
+	if len(err.onlineList) == 1 {
+		return "用户已在 " + err.onlineList[0].Address +
+			" 上登录，最后一次活动时间为 " +
+			err.onlineList[0].UpdatedAt.Format("2006-01-02 15:04:05Z07:00")
+
+	}
+	return "用户已在其他机器上登录"
+}
+
+func IsOnlinedError(err error) ([]SessionInfo, bool) {
+	oe, ok := err.(*ErrOnline)
+	if ok {
+		return oe.onlineList, true
+	}
+	return nil, false
+}
