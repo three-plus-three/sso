@@ -619,8 +619,6 @@ func (srv *Server) login(c echo.Context) error {
 
 	loginInfo.Address = c.RealIP()
 
-	var userData map[string]interface{}
-
 	userinfo, err := users.Auth(srv.userManager, &loginInfo)
 	if err != nil || userinfo == nil {
 		if err == nil {
@@ -655,7 +653,12 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	ticket, err := srv.tickets.NewTicket(loginInfo.Username, userData)
+	uuid, err := srv.online.Login(userinfo.ID, userinfo.Address, userinfo.Service)
+	if err != nil {
+		srv.logger.Println("创建在线用户失败 -", err)
+	}
+
+	ticket, err := srv.tickets.NewTicket(uuid, loginInfo.Username, userinfo.Data)
 	if err != nil {
 		srv.logger.Println("内部生成 ticket 失败 -", err)
 
@@ -665,28 +668,24 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	return srv.loginOK(c, ticket, userinfo)
+	return srv.loginOK(c, ticket, userinfo.Service)
 }
 
-func (srv *Server) loginOK(c echo.Context, ticket *Ticket, userinfo *users.UserInfo) error {
-	err := srv.online.Login(userinfo.ID, userinfo.Address, userinfo.Service)
-	if err != nil {
-		srv.logger.Println("创建在线用户失败 -", err)
-	}
-
-	serviceTicket := srv.authenticatingTickets.new(ticket, userinfo.Service)
+func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
+	serviceTicket := srv.authenticatingTickets.new(ticket, service)
 
 	c.SetCookie(&http.Cookie{Name: srv.tokenName,
 		Value: ticket.Ticket,
 		Path:  srv.cookiePath,
 		// Expires: ticket.ExpiresAt, // 不指定过期时间，那么关闭浏览器后 cookie 会删除
 	})
-	if userinfo.Service != "" {
-		returnURL := userinfo.Service
+	if service != "" {
+		returnURL := service
 		u, err := url.Parse(returnURL)
 		if err == nil {
 			queryParams := u.Query()
 			queryParams.Set("ticket", serviceTicket)
+			queryParams.Set("session_id", ticket.SessionID)
 			queryParams.Set("username", ticket.Username)
 			if o := ticket.Data["is_new"]; o != nil {
 				queryParams.Set("is_new", fmt.Sprint(o))
@@ -728,7 +727,7 @@ func (srv *Server) logout(c echo.Context) error {
 	}
 
 	if ticket != nil {
-		err := srv.online.Logout(ticket.Username, c.RealIP())
+		err := srv.online.Logout(ticket.SessionID)
 		if err != nil {
 			srv.logger.Println("删除 在线用户 失败 -", err)
 		}

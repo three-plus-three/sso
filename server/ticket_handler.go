@@ -24,7 +24,7 @@ type Ticket struct {
 
 // TicketHandler 票据的管理
 type TicketHandler interface {
-	NewTicket(username string, data map[string]interface{}) (*Ticket, error)
+	NewTicket(uuid, username string, data map[string]interface{}) (*Ticket, error)
 	ValidateTicket(ticket string, renew bool) (*Ticket, error)
 	RemoveTicket(ticket string) (*Ticket, error)
 }
@@ -120,19 +120,22 @@ type jwtTicketHandler struct {
 	keyFunc         func(t *jwt.Token) (interface{}, error)
 }
 
-func (jh *jwtTicketHandler) NewTicket(username string, data map[string]interface{}) (*Ticket, error) {
+func (jh *jwtTicketHandler) NewTicket(uuid, username string, data map[string]interface{}) (*Ticket, error) {
 	issuedAt := time.Now()
 	expiredAt := issuedAt.Add(jh.expiredInternal)
 
 	token := jwt.NewWithClaims(jh.signingMethod, &jwt.StandardClaims{
-		//Audience  string `json:"aud,omitempty"`
+		Audience:  username,
 		ExpiresAt: expiredAt.Unix(),
+		Id:        uuid,
 		IssuedAt:  issuedAt.Unix(),
 		Issuer:    "hengwei_it",
-		Subject:   "tpt",
+		//NotBefore int64  `json:"nbf,omitempty"`
+		Subject: "tpt",
 	})
 
 	res := map[string]interface{}{
+		"uuid":       uuid,
 		"username":   username,
 		"expired_at": expiredAt,
 		"issued_at":  issuedAt,
@@ -140,7 +143,9 @@ func (jh *jwtTicketHandler) NewTicket(username string, data map[string]interface
 
 	for k, v := range data {
 		found := false
-		for _, s := range []string{"username",
+		for _, s := range []string{
+			"uuid",
+			"username",
 			"password",
 			"name",
 			"expired_at",
