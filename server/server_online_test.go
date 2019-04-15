@@ -47,7 +47,7 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 
 	assert("mei", 1)
 
-	// 确保再次登录是OK的
+	t.Log("确保再次登录是OK的")
 	_, err = srv.client.NewTicket("mei", "aat", false)
 	if err != nil {
 		t.Error(err)
@@ -56,6 +56,7 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 
 	assert("mei", 1)
 
+	t.Log("用别的 IP 登录是不好的")
 	client2, err := client.NewClient(srv.hsrv.URL)
 	if err != nil {
 		t.Error(err)
@@ -72,6 +73,7 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 		return
 	}
 
+	t.Log("测试已退出后，再用别的 IP 登录是好的")
 	srv.client.SetHeader(HeaderXForwardedFor, "192.168.1.2")
 	err = srv.client.RemoveTicket(ticket.ServiceTicket)
 	if err != nil {
@@ -95,6 +97,8 @@ func TestOnlineUserIsOkAfterAnotherLoginIsLogout(t *testing.T) {
 	defer srv.Close()
 
 	var assert = func(username string, exceptCount int) {
+		t.Helper()
+
 		var count int
 		err := srv.db.QueryRow("select count(*) from online_users where exists(select * from users where online_users.user_id = users.id and users.username = $1)", username).Scan(&count)
 		if err != nil {
@@ -138,7 +142,7 @@ func TestOnlineUserIsOkAfterAnotherLoginIsLogout(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	assert("mei", 1)
+	assert("mei", 2)
 
 	err = srv.client.RemoveTicket(ticket.ServiceTicket)
 	if err != nil {

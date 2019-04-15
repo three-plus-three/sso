@@ -61,6 +61,12 @@ var (
 
 	// ErrPermissionDenied 没有权限
 	ErrPermissionDenied = users.ErrPermissionDenied
+
+	// ErrCaptchaKey
+	ErrCaptchaKey = users.ErrCaptchaKey
+
+	// ErrCaptchaMissing
+	ErrCaptchaMissing = users.ErrCaptchaMissing
 )
 
 type ErrExternalServer struct {
@@ -520,7 +526,11 @@ func (srv *Server) loginGet(c echo.Context) error {
 }
 
 func (srv *Server) relogin(c echo.Context, loginInfo users.LoginInfo, message string, err error) error {
-	if ErrUserIPBlocked == err {
+	if ErrCaptchaKey == err {
+		message = "请输入验证码"
+	} else if ErrCaptchaMissing == err {
+		message = "验证码错误"
+	} else if ErrUserIPBlocked == err {
 		message = "用户不能在该地址访问"
 	} else if err == ErrUserLocked {
 		message = "错误次数大多，帐号被锁定！"
@@ -599,25 +609,7 @@ func (srv *Server) login(c echo.Context) error {
 		return srv.relogin(c, loginInfo, "请输入用户名", nil)
 	}
 
-	if count := srv.userManager.FailCount(loginInfo.Username); count > 0 {
-		if loginInfo.CaptchaKey == "" || loginInfo.CaptchaValue == "" {
-			if isConsumeJSON(c) {
-				return c.String(http.StatusUnauthorized, "请输入验证码")
-			}
-			return srv.relogin(c, loginInfo, "请输入验证码", nil)
-		}
-
-		//比较图像验证码
-		if !base64Captcha.VerifyCaptcha(loginInfo.CaptchaKey, loginInfo.CaptchaValue) {
-			if isConsumeJSON(c) {
-				return c.String(http.StatusUnauthorized, "验证码不正确")
-			}
-
-			return srv.relogin(c, loginInfo, "验证码不正确", nil)
-		}
-	}
-
-	loginInfo.Address = c.RealIP()
+	loginInfo.Address = RealIP(c.Request())
 
 	userinfo, err := users.Auth(srv.userManager, &loginInfo)
 	if err != nil || userinfo == nil {
@@ -642,6 +634,8 @@ func (srv *Server) login(c echo.Context) error {
 			ErrUserNotFound,
 			ErrUserLocked,
 			ErrUserIPBlocked,
+			ErrCaptchaKey,
+			ErrCaptchaMissing,
 		} {
 			if err == excepted {
 				return err

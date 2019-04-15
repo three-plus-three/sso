@@ -42,6 +42,12 @@ var (
 
 	// ErrPermissionDenied 没有权限
 	ErrPermissionDenied = echo.NewHTTPError(http.StatusUnauthorized, "permission is denied")
+
+	// ErrCaptchaKey
+	ErrCaptchaKey = echo.NewHTTPError(http.StatusUnauthorized, "captcha is error")
+
+	// ErrCaptchaMissing
+	ErrCaptchaMissing = echo.NewHTTPError(http.StatusUnauthorized, "captcha is missing")
 )
 
 type ErrOnline struct {

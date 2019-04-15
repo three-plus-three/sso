@@ -477,6 +477,9 @@ func Auth(um UserManager, loginInfo *LoginInfo) (*UserInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	if auth == nil {
+		return nil, ErrUserNotFound
+	}
 
 	userinfo, err := um.Auth(auth, loginInfo)
 	if err == nil {

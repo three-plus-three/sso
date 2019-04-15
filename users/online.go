@@ -9,7 +9,6 @@ import (
 )
 
 type SessionInfo struct {
-	ID        int64
 	UUID      string
 	UserID    string
 	Username  string
@@ -54,7 +53,7 @@ func (do *dbOnline) Query(username string) ([]SessionInfo, error) {
 		}
 
 		rows, err = do.db.Query(do.querySQL, strings.ToLower(username))
-		if err != sql.ErrNoRows {
+		if err != nil && err != sql.ErrNoRows {
 			return nil, err
 		}
 		return nil, nil
@@ -72,7 +71,7 @@ func (do *dbOnline) query(rows *sql.Rows) ([]SessionInfo, error) {
 		var createdAt NullTime
 		var updatedAt NullTime
 
-		if err := rows.Scan(&info.ID, &info.UUID,
+		if err := rows.Scan(&info.UUID,
 			&info.UserID, &info.Username, &info.Nickname,
 			&addr, &createdAt, &updatedAt); err != nil {
 			return nil, err
@@ -95,24 +94,26 @@ func (do *dbOnline) query(rows *sql.Rows) ([]SessionInfo, error) {
 
 func (do *dbOnline) Login(userid interface{}, address, service string) (string, error) {
 	rows, err := do.db.Query(do.queryByUserIDSQL, userid)
-	if err != sql.ErrNoRows {
+	if err != nil && err != sql.ErrNoRows {
 		return "", err
 	}
-	defer rows.Close()
-	sessionList, err := do.query(rows)
-	if err != sql.ErrNoRows {
-		return "", err
-	}
-
-	foundIdx := -1
-	for idx, ol := range sessionList {
-		if ol.Address == address {
-			foundIdx = idx
-			break
+	if rows != nil {
+		defer rows.Close()
+		sessionList, err := do.query(rows)
+		if err != nil && err != sql.ErrNoRows {
+			return "", err
 		}
-	}
-	if foundIdx >= 0 {
-		return sessionList[foundIdx].UUID, nil
+
+		foundIdx := -1
+		for idx, ol := range sessionList {
+			if ol.Address == address {
+				foundIdx = idx
+				break
+			}
+		}
+		if foundIdx >= 0 {
+			return sessionList[foundIdx].UUID, nil
+		}
 	}
 
 	uuid := GenerateID()
@@ -135,7 +136,7 @@ func CreateDbSession(db *sql.DB, config *DbConfig) (Sessions, error) {
 	queryByUserIDSQL := "SELECT ou.uuid, ou.user_id, users.username, users.username, ou.address, ou.created_at, ou.updated_at " +
 		"FROM online_users ou join users on ou.user_id = users.id WHERE " +
 		"(ou.updated_at + interval '1 hour') > now() AND users.id = ?"
-	insertSQL := "INSERT INTO online_users(uuid, user_id, address, created_at, updated_at) VALUES(?, ?, ?, now(), now())"
+	insertSQL := "INSERT INTO online_users(user_id, uuid, address, created_at, updated_at) VALUES(?, ?, ?, now(), now())"
 	deleteSQL := "DELETE FROM online_users WHERE uuid = ?"
 
 	if config.Params != nil {
@@ -166,6 +167,7 @@ func CreateDbSession(db *sql.DB, config *DbConfig) (Sessions, error) {
 
 	if config.DbType == "postgres" || config.DbType == "postgresql" {
 		querySQL = ReplacePlaceholders(querySQL)
+		queryByUserIDSQL = ReplacePlaceholders(queryByUserIDSQL)
 		insertSQL = ReplacePlaceholders(insertSQL)
 		deleteSQL = ReplacePlaceholders(deleteSQL)
 	}
@@ -209,7 +211,7 @@ func (ow *onlineWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
 					break
 				}
 			}
-			if found {
+			if !found {
 				return nil, &ErrOnline{onlineList: onlineList}
 			}
 		}

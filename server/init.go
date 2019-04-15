@@ -36,9 +36,8 @@ var DefaultUserHandler = func(config *Config, logger *log.Logger) (UserManager, 
 	if err != nil {
 		return nil, nil, err
 	}
-	userManager.(interface {
-		SetUserNotFound(userNotFound UserNotFound)
-	}).SetUserNotFound(config.UserNotFound)
+	userManager = users.NotfoundWrap(userManager, config.UserNotFound, logger)
+
 	online, err := users.CreateDbSession(db, dbConfig)
 	if err != nil {
 		return nil, nil, err
@@ -46,6 +45,7 @@ var DefaultUserHandler = func(config *Config, logger *log.Logger) (UserManager, 
 
 	userManager = users.OnlineWrap(userManager, online, config.LoginConflict, logger)
 	userManager = users.FailCounterWrap(userManager, config.MaxLoginFailCount, logger)
+	userManager = users.CaptchaWrap(userManager, logger)
 	noClose = true
 	return userManager, online, nil
 }
