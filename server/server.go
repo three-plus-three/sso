@@ -69,18 +69,9 @@ var (
 	ErrCaptchaMissing = users.ErrCaptchaMissing
 )
 
-type ErrExternalServer struct {
-	Msg string
-}
+type ErrExternalServer = users.ErrExternalServer
 
-func (e *ErrExternalServer) Error() string {
-	return e.Msg
-}
-
-func IsErrExternalServer(e error) bool {
-	_, ok := e.(*ErrExternalServer)
-	return ok
-}
+var IsErrExternalServer = users.IsErrExternalServer
 
 // TicketGetter 从请求中获取票据
 type TicketGetter func(c echo.Context) string
@@ -298,7 +289,7 @@ func CreateServer(config *Config) (*Server, error) {
 	srv.engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
 	srv.engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
 
-	srv.engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(generateCaptcha(config.Captcha))))
+	srv.engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(users.GenerateCaptcha(config.Captcha))))
 	// srv.engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
 
 	return srv, nil

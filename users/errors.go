@@ -71,3 +71,16 @@ func IsOnlinedError(err error) ([]SessionInfo, bool) {
 	}
 	return nil, false
 }
+
+type ErrExternalServer struct {
+	Msg string
+}
+
+func (e *ErrExternalServer) Error() string {
+	return e.Msg
+}
+
+func IsErrExternalServer(e error) bool {
+	_, ok := e.(*ErrExternalServer)
+	return ok
+}

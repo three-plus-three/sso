@@ -20,7 +20,7 @@ type ConfigJsonBody struct {
 }
 
 // base64Captcha create http handler
-func generateCaptcha(config base64Captcha.ConfigDigit) func(w http.ResponseWriter, r *http.Request) {
+func GenerateCaptcha(config base64Captcha.ConfigDigit) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		id := query.Get("captcha_id")
@@ -43,7 +43,7 @@ var failResponse = map[string]interface{}{"success": false, "data": "验证失�
 var okResponse = map[string]interface{}{"success": true, "data": "验证通过", "msg": "captcha verified"}
 
 // base64Captcha verify http handler
-func captchaVerify(config base64Captcha.ConfigDigit) func(w http.ResponseWriter, r *http.Request) (bool, error) {
+func CaptchaVerify(config base64Captcha.ConfigDigit) func(w http.ResponseWriter, r *http.Request) (bool, error) {
 	return func(w http.ResponseWriter, r *http.Request) (bool, error) {
 
 		var captchaKey, verifyValue string
