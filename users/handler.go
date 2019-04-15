@@ -483,7 +483,9 @@ func Auth(um UserManager, loginInfo *LoginInfo) (*UserInfo, error) {
 
 	userinfo, err := um.Auth(auth, loginInfo)
 	if err == nil {
-		loginInfo.Username = userinfo.RawName()
+		if s := userinfo.RawName(); s != "" {
+			loginInfo.Username = userinfo.RawName()
+		}
 	}
 
 	return userinfo, err

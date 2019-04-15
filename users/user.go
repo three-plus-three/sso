@@ -176,9 +176,13 @@ func (u *UserImpl) Auth(loginInfo *LoginInfo) (*UserInfo, error) {
 		}
 		return nil, err
 	}
-	return &UserInfo{
+	uinfo := &UserInfo{
 		LoginInfo: *loginInfo,
 		ID:        u.id,
 		Data:      u.data,
-	}, nil
+	}
+	if u.name != "" {
+		uinfo.Username = u.name
+	}
+	return uinfo, nil
 }
