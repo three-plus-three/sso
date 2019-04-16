@@ -220,8 +220,8 @@ func CreateServer(config *Config) (*Server, error) {
 		theme:          config.Theme,
 		urlPrefix:      config.URLPrefix,
 		welcomeURL:     config.WelcomeURL,
-		userManager:    userManager,
-		online:         online,
+		UserManager:    userManager,
+		Online:         online,
 		tokenName:      tokenName,
 		ticketGetter:   ticketGetter,
 		tickets:        ticketHandler,
@@ -306,8 +306,8 @@ type Server struct {
 	urlPrefix             string
 	welcomeURL            string
 	tokenName             string
-	userManager           users.UserManager
-	online                users.Sessions
+	UserManager           users.UserManager
+	Online                users.Sessions
 	tickets               TicketHandler
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
@@ -458,7 +458,7 @@ func (srv *Server) lockedUsers(c echo.Context) error {
 }
 
 func (srv *Server) lockedUsersWithError(c echo.Context, unlocked error) error {
-	users, err := srv.userManager.Locked()
+	users, err := srv.UserManager.Locked()
 	data := map[string]interface{}{"global": srv.data,
 		"users": users}
 	if err != nil {
@@ -483,7 +483,7 @@ func (srv *Server) userUnlock(c echo.Context) error {
 	}
 
 	username := c.QueryParam("username")
-	err = srv.userManager.Unlock(username)
+	err = srv.UserManager.Unlock(username)
 	return srv.lockedUsersWithError(c, err)
 }
 
@@ -544,7 +544,7 @@ func (srv *Server) relogin(c echo.Context, loginInfo users.LoginInfo, message st
 		"errorMessage": message,
 	}
 
-	if count := srv.userManager.FailCount(loginInfo.Username); count > 0 {
+	if count := srv.UserManager.FailCount(loginInfo.Username); count > 0 {
 		captchaID := "" // time.Now().Format(time.RFC3339Nano)
 		data["captcha_id"] = captchaID
 		captchaKey, captchaCode := base64Captcha.GenerateCaptcha(captchaID, srv.captcha)
@@ -602,7 +602,7 @@ func (srv *Server) login(c echo.Context) error {
 
 	loginInfo.Address = RealIP(c.Request())
 
-	userinfo, err := users.Auth(srv.userManager, &loginInfo)
+	userinfo, err := users.Auth(srv.UserManager, &loginInfo)
 	if err != nil || userinfo == nil {
 		if err == nil {
 			err = ErrUserNotFound
@@ -638,7 +638,7 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	uuid, err := srv.online.Login(userinfo.ID, userinfo.Address, userinfo.Service)
+	uuid, err := srv.Online.Login(userinfo.ID, userinfo.Address, userinfo.Service)
 	if err != nil {
 		srv.logger.Println("创建在线用户失败 -", err)
 	}
@@ -694,7 +694,11 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 		return srv.redirect(c, returnURL)
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{"ticket": serviceTicket})
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"ticket":     serviceTicket,
+		"session_id": ticket.SessionID,
+		"username":   ticket.Username,
+	})
 }
 
 func (srv *Server) logout(c echo.Context) error {
@@ -712,7 +716,7 @@ func (srv *Server) logout(c echo.Context) error {
 	}
 
 	if ticket != nil {
-		err := srv.online.Logout(ticket.SessionID)
+		err := srv.Online.Logout(ticket.SessionID)
 		if err != nil {
 			srv.logger.Println("删除 在线用户 失败 -", err)
 		}
@@ -772,7 +776,9 @@ func (srv *Server) verifyTicket(c echo.Context) error {
 	if ticket == nil {
 		return c.JSON(http.StatusOK, map[string]interface{}{"ticket": serviceTicket, "valid": false})
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"ticket": serviceTicket,
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"ticket":     serviceTicket,
+		"username":   ticket.Username,
 		"session_id": ticket.SessionID,
 		"valid":      true,
 		"expires_at": ticket.ExpiresAt,
