@@ -13,9 +13,6 @@ import (
 	"github.com/three-plus-three/modules/netutil"
 )
 
-// DefaultUserManager 缺省 UserManager
-var DefaultUserManager = createUserManager
-
 // DbConfig 服务的数据库配置项
 type DbConfig struct {
 	DbType string
@@ -42,7 +39,7 @@ type UserManager interface {
 	Auth(u Authentication, loginInfo *LoginInfo) (*UserInfo, error)
 }
 
-func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, string) error, externalVerify VerifyFunc) (UserManager, error) {
+func CreateUserManager(dbType string, db *sql.DB, params map[string]interface{}, verify func(string, string) error, externalVerify VerifyFunc) (UserManager, error) {
 	querySQL := "SELECT * FROM users WHERE username = ?"
 	lockSQL := ""
 	unlockSQL := ""
@@ -58,49 +55,49 @@ func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, str
 	lockedTimeLayout := ""
 	whiteIPListFieldName := "white_addresses"
 
-	if userConfig.Params != nil {
-		if s, ok := stringWith(userConfig.Params, "userid", ""); !ok {
+	if params != nil {
+		if s, ok := stringWith(params, "userid", ""); !ok {
 			return nil, errors.New("数据库配置中的 username 的值不是字符串")
 		} else if s != "" {
 			idFieldName = s
 		}
 
-		if s, ok := stringWith(userConfig.Params, "username", ""); !ok {
+		if s, ok := stringWith(params, "username", ""); !ok {
 			return nil, errors.New("数据库配置中的 username 的值不是字符串")
 		} else if s != "" {
 			userFieldName = s
 		}
 
-		if s, ok := stringWith(userConfig.Params, "username_case_ignore", ""); !ok {
+		if s, ok := stringWith(params, "username_case_ignore", ""); !ok {
 			return nil, errors.New("数据库配置中的 username 的值不是字符串")
 		} else if s == "false" {
 			caseIgnore = false
 		}
 
-		if s, ok := stringWith(userConfig.Params, "password", ""); !ok {
+		if s, ok := stringWith(params, "password", ""); !ok {
 			return nil, errors.New("数据库配置中的 password 的值不是字符串")
 		} else if s != "" {
 			passwordFieldName = s
 		}
 
-		if s, ok := stringWith(userConfig.Params, "white_address_list", ""); !ok {
+		if s, ok := stringWith(params, "white_address_list", ""); !ok {
 			return nil, errors.New("数据库配置中的 white_address_list 的值不是字符串")
 		} else if s != "" {
 			whiteIPListFieldName = s
 		}
 
-		if s, ok := stringWith(userConfig.Params, "locked_at", ""); !ok {
+		if s, ok := stringWith(params, "locked_at", ""); !ok {
 			return nil, errors.New("数据库配置中的 locked_at 的值不是字符串")
 		} else if s != "" {
 			lockedFieldName = s
 
-			if s, ok := stringWith(userConfig.Params, "locked_format", ""); !ok {
+			if s, ok := stringWith(params, "locked_format", ""); !ok {
 				return nil, errors.New("数据库配置中的 locked_format 的值不是字符串")
 			} else if s != "" {
 				lockedTimeLayout = s
 			}
 
-			if s, ok := stringWith(userConfig.Params, "locked_time_expires", ""); !ok {
+			if s, ok := stringWith(params, "locked_time_expires", ""); !ok {
 				return nil, errors.New("数据库配置中的 locked_time_expires 的值不是字符串")
 			} else if s != "" {
 				duration, err := time.ParseDuration(s)
@@ -111,32 +108,32 @@ func createUserManager(db *sql.DB, userConfig *DbConfig, verify func(string, str
 			}
 		}
 
-		if s, ok := stringWith(userConfig.Params, "querySQL", ""); !ok {
+		if s, ok := stringWith(params, "querySQL", ""); !ok {
 			return nil, errors.New("数据库配置中的 querySQL 的值不是字符串")
 		} else if s != "" {
 			querySQL = s
 		}
 
-		if s, ok := stringWith(userConfig.Params, "lockSQL", ""); !ok {
+		if s, ok := stringWith(params, "lockSQL", ""); !ok {
 			return nil, errors.New("数据库配置中的 lockSQL 的值不是字符串")
 		} else if s != "" {
 			lockSQL = s
 		}
 
-		if s, ok := stringWith(userConfig.Params, "unlockSQL", ""); !ok {
+		if s, ok := stringWith(params, "unlockSQL", ""); !ok {
 			return nil, errors.New("数据库配置中的 unlockSQL 的值不是字符串")
 		} else if s != "" {
 			unlockSQL = s
 		}
 
-		if s, ok := stringWith(userConfig.Params, "lockedSQL", ""); !ok {
+		if s, ok := stringWith(params, "lockedSQL", ""); !ok {
 			return nil, errors.New("数据库配置中的 lockedSQL 的值不是字符串")
 		} else if s != "" {
 			lockedSQL = s
 		}
 	}
 
-	if userConfig.DbType == "postgres" || userConfig.DbType == "postgresql" {
+	if dbType == "postgres" || dbType == "postgresql" {
 		querySQL = ReplacePlaceholders(querySQL)
 		lockSQL = ReplacePlaceholders(lockSQL)
 		unlockSQL = ReplacePlaceholders(unlockSQL)

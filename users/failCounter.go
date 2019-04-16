@@ -105,6 +105,10 @@ var createFailCounter = func() FailCounter {
 }
 
 func FailCounterWrap(um UserManager, maxLoginFailCount int, logger *log.Logger) UserManager {
+	if maxLoginFailCount <= 0 {
+		maxLoginFailCount = 3
+	}
+
 	return &failCounterWrapper{
 		logger:            logger,
 		inner:             um,

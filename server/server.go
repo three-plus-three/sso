@@ -104,26 +104,20 @@ type Config struct {
 	CookieSecure   bool
 	CookieHTTPOnly bool
 
-	MaxLoginFailCount int
-	NewUserURL        string
-	WelcomeURL        string
-	RedirectMode      string
-	CookiesForLogout  []*http.Cookie
+	NewUserURL       string
+	WelcomeURL       string
+	RedirectMode     string
+	CookiesForLogout []*http.Cookie
 
-	LoginConflict string
-	ListenAt      string
-	UserConfig    interface{}
-	AuthConfig    interface{}
+	ListenAt string
 
-	UserNotFound   UserNotFound
-	ExternalVerify VerifyFunc
 	TicketLookup   string
 	TicketProtocol string
 	TicketConfig   map[string]interface{}
 }
 
 // CreateServer 创建一个 sso 服务
-func CreateServer(config *Config) (*Server, error) {
+func CreateServer(config *Config, userManager UserManager, online users.Sessions) (*Server, error) {
 	if strings.HasSuffix(config.URLPrefix, "/") {
 		config.URLPrefix = strings.TrimSuffix(config.URLPrefix, "/")
 	}
@@ -131,16 +125,6 @@ func CreateServer(config *Config) (*Server, error) {
 		config.CookiePath = "/"
 	} else if !strings.HasPrefix(config.CookiePath, "/") {
 		config.CookiePath = "/" + config.CookiePath
-	}
-	if config.MaxLoginFailCount <= 0 {
-		config.MaxLoginFailCount = 3
-	}
-
-	if config.LoginConflict != "force" &&
-		config.LoginConflict != "" &&
-		config.LoginConflict != "auto" &&
-		config.LoginConflict != "disableForce" {
-		return nil, errors.New("loginConflict is invalid - " + config.LoginConflict)
 	}
 
 	templateBox, err := rice.FindBox("static")
@@ -174,10 +158,10 @@ func CreateServer(config *Config) (*Server, error) {
 	// UserConfig     interface{}
 	// AuthConfig     interface{}
 
-	userManager, online, err := DefaultUserHandler(config, logger)
-	if err != nil {
-		return nil, err
-	}
+	//	userManager, online, err := DefaultUserHandler(config, logger)
+	//	if err != nil {
+	//		return nil, err
+	//	}
 
 	factory := TicketHandlerFactories[config.TicketProtocol]
 	if factory == nil {
@@ -212,7 +196,7 @@ func CreateServer(config *Config) (*Server, error) {
 			return c.QueryParam("_method")
 		}}))
 	srv := &Server{
-		engine:         e,
+		Engine:         e,
 		cookieDomain:   config.CookieDomain,
 		cookiePath:     config.CookiePath,
 		cookieSecure:   config.CookieSecure,
@@ -251,7 +235,7 @@ func CreateServer(config *Config) (*Server, error) {
 	if len(config.TampletePaths) == 0 {
 		config.TampletePaths = append(config.TampletePaths, filepath.Join("lib/web/sso"))
 	}
-	srv.engine.Renderer = &renderer{
+	srv.Engine.Renderer = &renderer{
 		srv:           srv,
 		templates:     map[string]*template.Template{},
 		templateRoots: config.TampletePaths,
@@ -276,28 +260,28 @@ func CreateServer(config *Config) (*Server, error) {
 			fs.ServeHTTP(w, r)
 		}))
 
-	srv.engine.GET(config.URLPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.URLPrefix, http.DefaultServeMux)))
-	srv.engine.GET(config.URLPrefix+"/static/*", echo.WrapHandler(assetHandler))
-	srv.engine.GET(config.URLPrefix+"/login", srv.loginGet)
-	srv.engine.POST(config.URLPrefix+"/login", srv.login)
-	srv.engine.POST(config.URLPrefix+"/logout", srv.logout)
-	srv.engine.GET(config.URLPrefix+"/logout", srv.logout)
-	//srv.engine.GET("/auth", srv.getTicket)
-	srv.engine.GET(config.URLPrefix+"/verify", srv.verifyTicket)
-	//srv.engine.POST("/verify", srv.verifyTickets)
+	srv.Engine.GET(config.URLPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.URLPrefix, http.DefaultServeMux)))
+	srv.Engine.GET(config.URLPrefix+"/static/*", echo.WrapHandler(assetHandler))
+	srv.Engine.GET(config.URLPrefix+"/login", srv.loginGet)
+	srv.Engine.POST(config.URLPrefix+"/login", srv.login)
+	srv.Engine.POST(config.URLPrefix+"/logout", srv.logout)
+	srv.Engine.GET(config.URLPrefix+"/logout", srv.logout)
+	//srv.Engine.GET("/auth", srv.getTicket)
+	srv.Engine.GET(config.URLPrefix+"/verify", srv.verifyTicket)
+	//srv.Engine.POST("/verify", srv.verifyTickets)
 
-	srv.engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
-	srv.engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
+	srv.Engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
+	srv.Engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
 
-	srv.engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(users.GenerateCaptcha(config.Captcha))))
-	// srv.engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
+	srv.Engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(users.GenerateCaptcha(config.Captcha))))
+	// srv.Engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
 
 	return srv, nil
 }
 
 // Server SSO 服务器
 type Server struct {
-	engine                *echo.Echo
+	Engine                *echo.Echo
 	theme                 string
 	cookieDomain          string
 	cookiePath            string
@@ -426,21 +410,21 @@ func (r *renderer) loadTemplate(name string) (*template.Template, error) {
 
 // Start starts an HTTP server.
 func (srv *Server) Start(address string) error {
-	return srv.engine.Start(address)
+	return srv.Engine.Start(address)
 }
 
 // StartTLS starts an HTTPS server.
 func (srv *Server) StartTLS(address string, certFile, keyFile string) (err error) {
-	return srv.engine.StartTLS(address, certFile, keyFile)
+	return srv.Engine.StartTLS(address, certFile, keyFile)
 }
 
 // StartAutoTLS starts an HTTPS server using certificates automatically installed from https://letsencrypt.org.
 func (srv *Server) StartAutoTLS(address string) error {
-	return srv.engine.StartAutoTLS(address)
+	return srv.Engine.StartAutoTLS(address)
 }
 
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	srv.engine.ServeHTTP(w, r)
+	srv.Engine.ServeHTTP(w, r)
 }
 
 func (srv *Server) lockedUsers(c echo.Context) error {

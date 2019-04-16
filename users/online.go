@@ -129,7 +129,7 @@ func (do *dbOnline) Logout(key string) error {
 	return err
 }
 
-func CreateDbSession(db *sql.DB, config *DbConfig) (Sessions, error) {
+func CreateDbSession(dbType string, db *sql.DB, params map[string]interface{}) (Sessions, error) {
 	querySQL := "SELECT ou.uuid, ou.user_id, users.username, users.username, ou.address, ou.created_at, ou.updated_at " +
 		"FROM online_users ou join users on ou.user_id = users.id WHERE " +
 		"(ou.updated_at + interval '1 hour') > now() AND users.username = ?"
@@ -139,33 +139,33 @@ func CreateDbSession(db *sql.DB, config *DbConfig) (Sessions, error) {
 	insertSQL := "INSERT INTO online_users(user_id, uuid, address, created_at, updated_at) VALUES(?, ?, ?, now(), now())"
 	deleteSQL := "DELETE FROM online_users WHERE uuid = ?"
 
-	if config.Params != nil {
-		if s, ok := stringWith(config.Params, "online.query", ""); !ok {
+	if params != nil {
+		if s, ok := stringWith(params, "online.query", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.query 的值不是字符串")
 		} else if s != "" {
 			querySQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.queryByUserID", ""); !ok {
+		if s, ok := stringWith(params, "online.queryByUserID", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.queryByUserID 的值不是字符串")
 		} else if s != "" {
 			queryByUserIDSQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.insert", ""); !ok {
+		if s, ok := stringWith(params, "online.insert", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.insert 的值不是字符串")
 		} else if s != "" {
 			insertSQL = s
 		}
 
-		if s, ok := stringWith(config.Params, "online.delete", ""); !ok {
+		if s, ok := stringWith(params, "online.delete", ""); !ok {
 			return nil, errors.New("数据库配置中的 online.delete 的值不是字符串")
 		} else if s != "" {
 			deleteSQL = s
 		}
 	}
 
-	if config.DbType == "postgres" || config.DbType == "postgresql" {
+	if dbType == "postgres" || dbType == "postgresql" {
 		querySQL = ReplacePlaceholders(querySQL)
 		queryByUserIDSQL = ReplacePlaceholders(queryByUserIDSQL)
 		insertSQL = ReplacePlaceholders(insertSQL)
@@ -240,14 +240,22 @@ func (ow *onlineWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserI
 	return ow.inner.Auth(auth, loginInfo)
 }
 
-func OnlineWrap(um UserManager, online Sessions, loginConflict string, logger *log.Logger) UserManager {
+func OnlineWrap(um UserManager, online Sessions, loginConflict string, logger *log.Logger) (UserManager, error) {
 	if online == nil {
-		return um
+		return um, nil
 	}
+
+	if loginConflict != "force" &&
+		loginConflict != "" &&
+		loginConflict != "auto" &&
+		loginConflict != "disableForce" {
+		return nil, errors.New("loginConflict is invalid - " + loginConflict)
+	}
+
 	return &onlineWrapper{
 		logger:        logger,
 		inner:         um,
 		online:        online,
 		loginConflict: loginConflict,
-	}
+	}, nil
 }
