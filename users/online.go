@@ -93,6 +93,9 @@ func (do *dbOnline) query(rows *sql.Rows) ([]SessionInfo, error) {
 }
 
 func (do *dbOnline) Login(userid interface{}, address, service string) (string, error) {
+	if userid == nil {
+		return "", errors.New("userid is missing")
+	}
 	rows, err := do.db.Query(do.queryByUserIDSQL, userid)
 	if err != nil && err != sql.ErrNoRows {
 		return "", err

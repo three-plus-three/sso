@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -196,7 +195,7 @@ func CreateServer(config *Config, userManager UserManager, online users.Sessions
 			return c.QueryParam("_method")
 		}}))
 	srv := &Server{
-		Engine:         e,
+		engine:         e,
 		cookieDomain:   config.CookieDomain,
 		cookiePath:     config.CookiePath,
 		cookieSecure:   config.CookieSecure,
@@ -235,7 +234,7 @@ func CreateServer(config *Config, userManager UserManager, online users.Sessions
 	if len(config.TampletePaths) == 0 {
 		config.TampletePaths = append(config.TampletePaths, filepath.Join("lib/web/sso"))
 	}
-	srv.Engine.Renderer = &renderer{
+	srv.engine.Renderer = &renderer{
 		srv:           srv,
 		templates:     map[string]*template.Template{},
 		templateRoots: config.TampletePaths,
@@ -260,28 +259,28 @@ func CreateServer(config *Config, userManager UserManager, online users.Sessions
 			fs.ServeHTTP(w, r)
 		}))
 
-	srv.Engine.GET(config.URLPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.URLPrefix, http.DefaultServeMux)))
-	srv.Engine.GET(config.URLPrefix+"/static/*", echo.WrapHandler(assetHandler))
-	srv.Engine.GET(config.URLPrefix+"/login", srv.loginGet)
-	srv.Engine.POST(config.URLPrefix+"/login", srv.login)
-	srv.Engine.POST(config.URLPrefix+"/logout", srv.logout)
-	srv.Engine.GET(config.URLPrefix+"/logout", srv.logout)
-	//srv.Engine.GET("/auth", srv.getTicket)
-	srv.Engine.GET(config.URLPrefix+"/verify", srv.verifyTicket)
-	//srv.Engine.POST("/verify", srv.verifyTickets)
+	srv.engine.GET(config.URLPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.URLPrefix, http.DefaultServeMux)))
+	srv.engine.GET(config.URLPrefix+"/static/*", echo.WrapHandler(assetHandler))
+	srv.engine.GET(config.URLPrefix+"/login", srv.loginGet)
+	srv.engine.POST(config.URLPrefix+"/login", srv.login)
+	srv.engine.POST(config.URLPrefix+"/logout", srv.logout)
+	srv.engine.GET(config.URLPrefix+"/logout", srv.logout)
+	//srv.engine.GET("/auth", srv.getTicket)
+	srv.engine.GET(config.URLPrefix+"/verify", srv.verifyTicket)
+	//srv.engine.POST("/verify", srv.verifyTickets)
 
-	srv.Engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
-	srv.Engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
+	srv.engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
+	srv.engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
 
-	srv.Engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(users.GenerateCaptcha(config.Captcha))))
-	// srv.Engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
+	srv.engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(users.GenerateCaptcha(config.Captcha))))
+	// srv.engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
 
 	return srv, nil
 }
 
 // Server SSO 服务器
 type Server struct {
-	Engine                *echo.Echo
+	engine                *echo.Echo
 	theme                 string
 	cookieDomain          string
 	cookiePath            string
@@ -301,6 +300,10 @@ type Server struct {
 	data                  map[string]interface{}
 
 	cookiesForLogout []*http.Cookie
+}
+
+func (srv *Server) Route() *echo.Group {
+	return srv.engine.Group(srv.urlPrefix)
 }
 
 type renderer struct {
@@ -410,21 +413,21 @@ func (r *renderer) loadTemplate(name string) (*template.Template, error) {
 
 // Start starts an HTTP server.
 func (srv *Server) Start(address string) error {
-	return srv.Engine.Start(address)
+	return srv.engine.Start(address)
 }
 
 // StartTLS starts an HTTPS server.
 func (srv *Server) StartTLS(address string, certFile, keyFile string) (err error) {
-	return srv.Engine.StartTLS(address, certFile, keyFile)
+	return srv.engine.StartTLS(address, certFile, keyFile)
 }
 
 // StartAutoTLS starts an HTTPS server using certificates automatically installed from https://letsencrypt.org.
 func (srv *Server) StartAutoTLS(address string) error {
-	return srv.Engine.StartAutoTLS(address)
+	return srv.engine.StartAutoTLS(address)
 }
 
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	srv.Engine.ServeHTTP(w, r)
+	srv.engine.ServeHTTP(w, r)
 }
 
 func (srv *Server) lockedUsers(c echo.Context) error {
@@ -622,12 +625,7 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	uuid, err := srv.Online.Login(userinfo.ID, userinfo.Address, userinfo.Service)
-	if err != nil {
-		srv.logger.Println("创建在线用户失败 -", err)
-	}
-
-	ticket, err := srv.tickets.NewTicket(uuid, loginInfo.Username, userinfo.Data)
+	ticket, err := srv.tickets.NewTicket(userinfo.IsNew, userinfo.Username, userinfo.Data)
 	if err != nil {
 		srv.logger.Println("内部生成 ticket 失败 -", err)
 
@@ -654,21 +652,12 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 		if err == nil {
 			queryParams := u.Query()
 			queryParams.Set("ticket", serviceTicket)
-			queryParams.Set("session_id", ticket.SessionID)
+			// queryParams.Set("session_id", ticket.SessionID)
 			queryParams.Set("username", ticket.Username)
-			if o := ticket.Data["is_new"]; o != nil {
-				queryParams.Set("is_new", fmt.Sprint(o))
-				if o := ticket.Data["roles"]; o != nil {
-					switch vv := o.(type) {
-					case []string:
-						queryParams["roles"] = vv
-					case []interface{}:
-						ss := make([]string, 0, len(vv))
-						for _, v := range vv {
-							ss = append(ss, fmt.Sprint(v))
-						}
-						queryParams["roles"] = ss
-					}
+			if ticket.IsNew {
+				queryParams.Set("is_new", "true")
+				if ss := ticket.Roles(); len(ss) > 0 {
+					queryParams["roles"] = ss
 				}
 			}
 			u.RawQuery = queryParams.Encode()
@@ -679,9 +668,10 @@ func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"ticket":     serviceTicket,
-		"session_id": ticket.SessionID,
-		"username":   ticket.Username,
+		"ticket":   serviceTicket,
+		"is_new":   ticket.IsNew,
+		"roles":    ticket.Roles(),
+		"username": ticket.Username,
 	})
 }
 
@@ -849,18 +839,4 @@ func readFileWithDefault(root string, files []string, defaultValue string) strin
 		}
 	}
 	return defaultValue
-}
-
-func Run(config *Config) {
-	srv, err := CreateServer(config)
-	if err != nil {
-		srv.logger.Println(err)
-		return
-	}
-
-	err = srv.Start(config.ListenAt)
-	if err != nil {
-		srv.logger.Println(err)
-		return
-	}
 }

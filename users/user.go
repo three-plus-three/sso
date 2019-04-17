@@ -29,8 +29,9 @@ func (u *LoginInfo) IsForce() bool {
 
 type UserInfo struct {
 	LoginInfo
-	ID   interface{}
-	Data map[string]interface{}
+	IsNew bool
+	ID    interface{}
+	Data  map[string]interface{}
 }
 
 func (u *UserInfo) RawName() string {
@@ -65,7 +66,7 @@ type LocalUser interface {
 type VerifyFunc func(method string, localUser LocalUser, loginInfo *LoginInfo) (*UserInfo, error)
 
 // UserNotFound 用户不存在时的回调
-type UserNotFound func(loginInfo *LoginInfo) (map[string]interface{}, error)
+type UserNotFound func(loginInfo *LoginInfo) (bool, map[string]interface{}, error)
 
 var localAddressList, _ = net.LookupHost("localhost")
 

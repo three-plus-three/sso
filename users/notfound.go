@@ -3,12 +3,14 @@ package users
 import "log"
 
 type SimpleAuthentication struct {
+	IsNew    bool
 	UserData map[string]interface{}
 }
 
 func (u *SimpleAuthentication) Auth(loginInfo *LoginInfo) (*UserInfo, error) {
 	return &UserInfo{
 		LoginInfo: *loginInfo,
+		IsNew:     u.IsNew,
 		Data:      u.UserData,
 	}, nil
 }
@@ -33,11 +35,11 @@ func (nfw *notfoundWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
 		return u, nil
 	}
 
-	userData, err := nfw.userNotFound(loginInfo)
+	isNew, userData, err := nfw.userNotFound(loginInfo)
 	if err != nil {
 		return nil, err
 	}
-	return &SimpleAuthentication{UserData: userData}, nil
+	return &SimpleAuthentication{IsNew: isNew, UserData: userData}, nil
 }
 
 func (nfw *notfoundWrapper) Lock(username string) error {

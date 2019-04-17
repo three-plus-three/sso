@@ -9,10 +9,12 @@ import (
 
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo"
+	"github.com/three-plus-three/sso/users"
 )
 
 // Ticket 票据对象
 type Ticket struct {
+	IsNew     bool
 	Ticket    string
 	Username  string
 	SessionID string
@@ -21,9 +23,33 @@ type Ticket struct {
 	Data      map[string]interface{}
 }
 
+func (ticket *Ticket) Roles() []string {
+	if !ticket.IsNew {
+		return nil
+	}
+	if ticket.Data == nil {
+		return nil
+	}
+	o := ticket.Data["roles"]
+	if o == nil {
+		return nil
+	}
+	switch vv := o.(type) {
+	case []string:
+		return vv
+	case []interface{}:
+		ss := make([]string, 0, len(vv))
+		for _, v := range vv {
+			ss = append(ss, fmt.Sprint(v))
+		}
+		return ss
+	}
+	return nil
+}
+
 // TicketHandler 票据的管理
 type TicketHandler interface {
-	NewTicket(uuid, username string, data map[string]interface{}) (*Ticket, error)
+	NewTicket(isNew bool, username string, data map[string]interface{}) (*Ticket, error)
 	ValidateTicket(ticket string, renew bool) (*Ticket, error)
 	RemoveTicket(ticket string) (*Ticket, error)
 }
@@ -119,18 +145,19 @@ type jwtTicketHandler struct {
 	keyFunc         func(t *jwt.Token) (interface{}, error)
 }
 
-func (jh *jwtTicketHandler) NewTicket(uuid, username string, data map[string]interface{}) (*Ticket, error) {
+func (jh *jwtTicketHandler) NewTicket(isNew bool, username string, data map[string]interface{}) (*Ticket, error) {
 	issuedAt := time.Now()
 	expiredAt := issuedAt.Add(jh.expiredInternal)
 
+	uuid := users.GenerateID()
 	token := jwt.NewWithClaims(jh.signingMethod, &jwt.StandardClaims{
 		Audience:  username,
 		ExpiresAt: expiredAt.Unix(),
 		Id:        uuid,
 		IssuedAt:  issuedAt.Unix(),
 		Issuer:    "hengwei_it",
-		//NotBefore int64  `json:"nbf,omitempty"`
-		Subject: "tpt",
+		NotBefore: issuedAt.Unix(),
+		Subject:   "tpt",
 	})
 
 	res := map[string]interface{}{
@@ -175,9 +202,9 @@ func (jh *jwtTicketHandler) NewTicket(uuid, username string, data map[string]int
 	}
 
 	ticketObject := &Ticket{
+		IsNew:     isNew,
 		Ticket:    t,
 		Username:  username,
-		SessionID: uuid,
 		ExpiresAt: expiredAt,
 		IssuedAt:  issuedAt,
 		Data:      res,
