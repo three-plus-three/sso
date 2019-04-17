@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+var ErrCookieNotFound = errors.New("session cookie isn't found")
+var ErrCookieEmpty = errors.New("session cookie is empty")
+
 const (
 	// DefaultSessionKey default key value
 	DefaultSessionKey  = "PLAY_SESSION"
@@ -111,7 +114,7 @@ func Encode(values url.Values, h func() hash.Hash, secretKey []byte) string {
 
 func GetValuesFromString(value string, verify func(data, sig string) bool) (url.Values, error) {
 	if value == "" {
-		return nil, errors.New("session cookie is empty")
+		return nil, ErrCookieEmpty
 	}
 
 	// Separate the data from the signature.
@@ -147,7 +150,7 @@ func GetValuesFromCookie(req *http.Request, sessionKey string, verify func(data,
 	cookie, err := req.Cookie(sessionKey)
 	if err != nil {
 		if err == http.ErrNoCookie {
-			return nil, errors.New("session cookie isn't found")
+			return nil, ErrCookieNotFound
 		}
 		return nil, err
 	}
