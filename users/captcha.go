@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -100,14 +101,16 @@ type captchaWrapper struct {
 }
 
 func (ow *captchaWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
-	if count := ow.inner.FailCount(loginInfo.Username); count > 0 {
-		if loginInfo.CaptchaKey == "" || loginInfo.CaptchaValue == "" {
-			return nil, ErrCaptchaMissing
-		}
+	if !loginInfo.NoCaptcha {
+		if count := ow.inner.FailCount(loginInfo.Username); count > 0 {
+			if loginInfo.CaptchaKey == "" || loginInfo.CaptchaValue == "" {
+				return nil, ErrCaptchaMissing
+			}
 
-		//比较图像验证码
-		if !base64Captcha.VerifyCaptcha(loginInfo.CaptchaKey, loginInfo.CaptchaValue) {
-			return nil, ErrCaptchaKey
+			//比较图像验证码
+			if !base64Captcha.VerifyCaptcha(loginInfo.CaptchaKey, loginInfo.CaptchaValue) {
+				return nil, ErrCaptchaKey
+			}
 		}
 	}
 	return ow.inner.Read(loginInfo)
@@ -129,8 +132,8 @@ func (ow *captchaWrapper) FailCount(username string) int {
 	return ow.inner.FailCount(username)
 }
 
-func (ow *captchaWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
-	return ow.inner.Auth(auth, loginInfo)
+func (ow *captchaWrapper) Auth(ctx context.Context, auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	return ow.inner.Auth(ctx, auth, loginInfo)
 }
 
 func CaptchaWrap(um UserManager, logger *log.Logger) UserManager {

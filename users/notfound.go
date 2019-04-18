@@ -1,6 +1,9 @@
 package users
 
-import "log"
+import (
+	"context"
+	"log"
+)
 
 type SimpleAuthentication struct {
 	IsNew    bool
@@ -58,8 +61,8 @@ func (nfw *notfoundWrapper) FailCount(username string) int {
 	return nfw.inner.FailCount(username)
 }
 
-func (nfw *notfoundWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
-	return nfw.inner.Auth(auth, loginInfo)
+func (nfw *notfoundWrapper) Auth(ctx context.Context, auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	return nfw.inner.Auth(ctx, auth, loginInfo)
 }
 
 func NotfoundWrap(um UserManager, userNotFound UserNotFound, logger *log.Logger) UserManager {

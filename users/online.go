@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
@@ -10,7 +11,7 @@ import (
 
 type SessionInfo struct {
 	UUID      string
-	UserID    string
+	UserID    interface{}
 	Username  string
 	Nickname  string
 	Address   string
@@ -37,22 +38,22 @@ func (sess EmptySessions) Query(username string) ([]SessionInfo, error) {
 	return nil, nil
 }
 
-type dbOnline struct {
-	db               *sql.DB
+type DbOnline struct {
+	Db               *sql.DB
 	querySQL         string
 	queryByUserIDSQL string
 	insertSQL        string
 	deleteSQL        string
 }
 
-func (do *dbOnline) Query(username string) ([]SessionInfo, error) {
-	rows, err := do.db.Query(do.querySQL, username)
+func (do *DbOnline) Query(username string) ([]SessionInfo, error) {
+	rows, err := do.Db.Query(do.querySQL, username)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			return nil, err
 		}
 
-		rows, err = do.db.Query(do.querySQL, strings.ToLower(username))
+		rows, err = do.Db.Query(do.querySQL, strings.ToLower(username))
 		if err != nil && err != sql.ErrNoRows {
 			return nil, err
 		}
@@ -60,49 +61,61 @@ func (do *dbOnline) Query(username string) ([]SessionInfo, error) {
 	}
 	defer rows.Close()
 
-	return do.query(rows)
+	return do.QueryRows(rows)
 }
 
-func (do *dbOnline) query(rows *sql.Rows) ([]SessionInfo, error) {
+func (do *DbOnline) Read(info *SessionInfo, row interface {
+	Scan(values ...interface{}) error
+}) error {
+	var userid int64
+	var addr sql.NullString
+	var createdAt NullTime
+	var updatedAt NullTime
+
+	if err := row.Scan(&info.UUID,
+		&userid, &info.Username, &info.Nickname,
+		&addr, &createdAt, &updatedAt); err != nil {
+		return err
+	}
+
+	info.UserID = userid
+
+	if addr.Valid {
+		info.Address = addr.String
+	}
+	if createdAt.Valid {
+		info.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		info.UpdatedAt = updatedAt.Time
+	}
+
+	return nil
+}
+
+func (do *DbOnline) QueryRows(rows *sql.Rows) ([]SessionInfo, error) {
 	var onlineList = make([]SessionInfo, 0, 1)
 	for rows.Next() {
 		var info SessionInfo
-		var addr sql.NullString
-		var createdAt NullTime
-		var updatedAt NullTime
-
-		if err := rows.Scan(&info.UUID,
-			&info.UserID, &info.Username, &info.Nickname,
-			&addr, &createdAt, &updatedAt); err != nil {
+		if err := do.Read(&info, rows); err != nil {
 			return nil, err
-		}
-
-		if addr.Valid {
-			info.Address = addr.String
-		}
-		if createdAt.Valid {
-			info.CreatedAt = createdAt.Time
-		}
-		if updatedAt.Valid {
-			info.UpdatedAt = updatedAt.Time
 		}
 		onlineList = append(onlineList, info)
 	}
-
 	return onlineList, nil
 }
 
-func (do *dbOnline) Login(userid interface{}, address, service string) (string, error) {
+func (do *DbOnline) Login(userid interface{}, address, service string) (string, error) {
 	if userid == nil {
 		return "", errors.New("userid is missing")
 	}
-	rows, err := do.db.Query(do.queryByUserIDSQL, userid)
+	rows, err := do.Db.Query(do.queryByUserIDSQL, userid)
 	if err != nil && err != sql.ErrNoRows {
 		return "", err
 	}
 	if rows != nil {
 		defer rows.Close()
-		sessionList, err := do.query(rows)
+		sessionList, err := do.QueryRows(rows)
 		if err != nil && err != sql.ErrNoRows {
 			return "", err
 		}
@@ -120,19 +133,19 @@ func (do *dbOnline) Login(userid interface{}, address, service string) (string, 
 	}
 
 	uuid := GenerateID()
-	_, err = do.db.Exec(do.insertSQL, userid, uuid, address)
+	_, err = do.Db.Exec(do.insertSQL, userid, uuid, address)
 	if err != nil {
 		return "", err
 	}
 	return uuid, nil
 }
 
-func (do *dbOnline) Logout(key string) error {
-	_, err := do.db.Exec(do.deleteSQL, key)
+func (do *DbOnline) Logout(key string) error {
+	_, err := do.Db.Exec(do.deleteSQL, key)
 	return err
 }
 
-func CreateDbSession(dbType string, db *sql.DB, params map[string]interface{}) (Sessions, error) {
+func CreateDbSession(dbType string, db *sql.DB, params map[string]interface{}) (*DbOnline, error) {
 	querySQL := "SELECT ou.uuid, ou.user_id, users.username, users.username, ou.address, ou.created_at, ou.updated_at " +
 		"FROM online_users ou join users on ou.user_id = users.id WHERE " +
 		"(ou.updated_at + interval '1 hour') > now() AND users.username = ?"
@@ -175,8 +188,8 @@ func CreateDbSession(dbType string, db *sql.DB, params map[string]interface{}) (
 		deleteSQL = ReplacePlaceholders(deleteSQL)
 	}
 
-	return &dbOnline{
-		db:               db,
+	return &DbOnline{
+		Db:               db,
 		querySQL:         querySQL,
 		queryByUserIDSQL: queryByUserIDSQL,
 		insertSQL:        insertSQL,
@@ -239,8 +252,8 @@ func (ow *onlineWrapper) FailCount(username string) int {
 	return ow.inner.FailCount(username)
 }
 
-func (ow *onlineWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
-	return ow.inner.Auth(auth, loginInfo)
+func (ow *onlineWrapper) Auth(ctx context.Context, auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	return ow.inner.Auth(ctx, auth, loginInfo)
 }
 
 func OnlineWrap(um UserManager, online Sessions, loginConflict string, logger *log.Logger) (UserManager, error) {

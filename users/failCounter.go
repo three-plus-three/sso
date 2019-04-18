@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"log"
 	"sync"
 )
@@ -36,8 +37,8 @@ func (fcw *failCounterWrapper) FailCount(username string) int {
 	return fcw.failCounter.Count(username)
 }
 
-func (fcw *failCounterWrapper) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
-	userInfo, err := fcw.inner.Auth(auth, loginInfo)
+func (fcw *failCounterWrapper) Auth(ctx context.Context, auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+	userInfo, err := fcw.inner.Auth(ctx, auth, loginInfo)
 	if err == nil {
 		fcw.failCounter.Zero(loginInfo.Username)
 	} else {

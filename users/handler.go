@@ -3,6 +3,7 @@ package users
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -36,7 +37,7 @@ type UserManager interface {
 
 	FailCount(username string) int
 
-	Auth(u Authentication, loginInfo *LoginInfo) (*UserInfo, error)
+	Auth(ctx context.Context, u Authentication, loginInfo *LoginInfo) (*UserInfo, error)
 }
 
 func CreateUserManager(dbType string, db *sql.DB, params map[string]interface{}, verify func(string, string) error, externalVerify VerifyFunc) (UserManager, error) {
@@ -465,11 +466,11 @@ func (ah *userManager) FailCount(username string) int {
 	return 0
 }
 
-func (ah *userManager) Auth(u Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+func (ah *userManager) Auth(ctx context.Context, u Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
 	return u.Auth(loginInfo)
 }
 
-func Auth(um UserManager, loginInfo *LoginInfo) (*UserInfo, error) {
+func Auth(ctx context.Context, um UserManager, loginInfo *LoginInfo) (*UserInfo, error) {
 	auth, err := um.Read(loginInfo)
 	if err != nil {
 		return nil, err
@@ -478,7 +479,7 @@ func Auth(um UserManager, loginInfo *LoginInfo) (*UserInfo, error) {
 		return nil, ErrUserNotFound
 	}
 
-	userinfo, err := um.Auth(auth, loginInfo)
+	userinfo, err := um.Auth(ctx, auth, loginInfo)
 	if err == nil {
 		if s := userinfo.RawName(); s != "" {
 			loginInfo.Username = userinfo.RawName()

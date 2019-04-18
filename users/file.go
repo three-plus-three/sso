@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -69,7 +70,7 @@ func (ah *FileUserManager) FailCount(username string) int {
 	return 0
 }
 
-func (ow *FileUserManager) Auth(auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
+func (ow *FileUserManager) Auth(ctx context.Context, auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
 	return auth.Auth(loginInfo)
 }
 

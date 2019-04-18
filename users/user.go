@@ -18,7 +18,8 @@ type LoginInfo struct {
 	CaptchaKey   string `json:"captcha_key,omitempty" xml:"captcha_key" form:"captcha_key" query:"captcha_key"`
 	CaptchaValue string `json:"captcha_value,omitempty" xml:"captcha_value" form:"captcha_value" query:"captcha_value"`
 
-	Address string
+	Address   string
+	NoCaptcha bool
 }
 
 func (u *LoginInfo) IsForce() bool {

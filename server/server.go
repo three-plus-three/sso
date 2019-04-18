@@ -587,9 +587,10 @@ func (srv *Server) login(c echo.Context) error {
 		return srv.relogin(c, loginInfo, "请输入用户名", nil)
 	}
 
+	loginInfo.NoCaptcha = false
 	loginInfo.Address = RealIP(c.Request())
 
-	userinfo, err := users.Auth(srv.UserManager, &loginInfo)
+	userinfo, err := users.Auth(c.Request().Context(), srv.UserManager, &loginInfo)
 	if err != nil || userinfo == nil {
 		if err == nil {
 			err = ErrUserNotFound
