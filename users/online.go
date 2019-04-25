@@ -68,11 +68,12 @@ func (do *DbOnline) Read(info *SessionInfo, row interface {
 	Scan(values ...interface{}) error
 }) error {
 	var userid int64
+	var uuid sql.NullString
 	var addr sql.NullString
 	var createdAt NullTime
 	var updatedAt NullTime
 
-	if err := row.Scan(&info.UUID,
+	if err := row.Scan(&uuid,
 		&userid, &info.Username, &info.Nickname,
 		&addr, &createdAt, &updatedAt); err != nil {
 		return err
@@ -80,6 +81,9 @@ func (do *DbOnline) Read(info *SessionInfo, row interface {
 
 	info.UserID = userid
 
+	if uuid.Valid {
+		info.UUID = uuid.String
+	}
 	if addr.Valid {
 		info.Address = addr.String
 	}
