@@ -18,11 +18,11 @@ var (
 )
 
 func TestLoginFailAndAlreadyOnline(t *testing.T) {
-	config := MakeTestConfig()
-	config.UserConfig.(*DbConfig).Params = onlineUserTestParams
+	// config := MakeTestConfig()
+	//config.UserConfig.(*DbConfig).Params = onlineUserTestParams
 	//config.AuthConfig = signTestParams
 
-	srv := startTest(t, "", config)
+	srv := startTest(t, "", MakeTestConfig(), MakeDbConfig())
 	defer srv.Close()
 
 	var assert = func(username string, exceptCount int) {
@@ -89,11 +89,11 @@ func TestLoginFailAndAlreadyOnline(t *testing.T) {
 }
 
 func TestOnlineUserIsOkAfterAnotherLoginIsLogout(t *testing.T) {
-	config := MakeTestConfig()
-	config.UserConfig.(*DbConfig).Params = onlineUserTestParams
+	//config := MakeTestConfig()
+	//config.UserConfig.(*DbConfig).Params = onlineUserTestParams
 	//config.AuthConfig = signTestParams
 
-	srv := startTest(t, "", config)
+	srv := startTest(t, "", MakeTestConfig(), MakeDbConfig())
 	defer srv.Close()
 
 	var assert = func(username string, exceptCount int) {

@@ -2,7 +2,8 @@ package users
 
 import (
 	"context"
-	"log"
+
+	"github.com/runner-mei/log"
 )
 
 type SimpleAuthentication struct {
@@ -19,7 +20,7 @@ func (u *SimpleAuthentication) Auth(loginInfo *LoginInfo) (*UserInfo, error) {
 }
 
 type notfoundWrapper struct {
-	logger       *log.Logger
+	logger       log.Logger
 	inner        UserManager
 	userNotFound UserNotFound
 }
@@ -65,7 +66,7 @@ func (nfw *notfoundWrapper) Auth(ctx context.Context, auth Authentication, login
 	return nfw.inner.Auth(ctx, auth, loginInfo)
 }
 
-func NotfoundWrap(um UserManager, userNotFound UserNotFound, logger *log.Logger) UserManager {
+func NotfoundWrap(um UserManager, userNotFound UserNotFound, logger log.Logger) UserManager {
 	return &notfoundWrapper{
 		logger:       logger,
 		inner:        um,

@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/runner-mei/log"
 )
 
 var _ UserManager = &FileUserManager{}
 
 type FileUserManager struct {
-	Logger        *log.Logger
+	Logger        log.Logger
 	RootDir       string
 	SigningMethod SigningMethod
 }
@@ -34,7 +35,7 @@ func (h *FileUserManager) Read(loginInfo *LoginInfo) (Authentication, error) {
 	reader, err := os.Open(file)
 	if err != nil {
 		if os.IsNotExist(err) {
-			h.Logger.Println("[warn]", err)
+			h.Logger.Warn("load users fail", log.Error(err))
 
 			if "admin" == loginInfo.Username {
 				return &fileUser{name: "admin",

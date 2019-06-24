@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 
 	"github.com/mojocn/base64Captcha"
+	"github.com/runner-mei/log"
 )
 
 //ConfigJsonBody json request body.
@@ -95,7 +95,7 @@ func CaptchaVerify(config base64Captcha.ConfigDigit) func(w http.ResponseWriter,
 }
 
 type captchaWrapper struct {
-	logger  *log.Logger
+	logger  log.Logger
 	inner   UserManager
 	captcha interface{}
 }
@@ -136,7 +136,7 @@ func (ow *captchaWrapper) Auth(ctx context.Context, auth Authentication, loginIn
 	return ow.inner.Auth(ctx, auth, loginInfo)
 }
 
-func CaptchaWrap(um UserManager, logger *log.Logger) UserManager {
+func CaptchaWrap(um UserManager, logger log.Logger) UserManager {
 	return &captchaWrapper{
 		logger: logger,
 		inner:  um,

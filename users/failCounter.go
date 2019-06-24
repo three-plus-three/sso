@@ -2,12 +2,13 @@ package users
 
 import (
 	"context"
-	"log"
 	"sync"
+
+	"github.com/runner-mei/log"
 )
 
 type failCounterWrapper struct {
-	logger            *log.Logger
+	logger            log.Logger
 	inner             UserManager
 	failCounter       FailCounter
 	maxLoginFailCount int
@@ -54,7 +55,7 @@ func (fcw *failCounterWrapper) lockUserIfNeed(loginInfo *LoginInfo) {
 	var failCount = fcw.failCounter.Count(loginInfo.Username)
 	if failCount > fcw.maxLoginFailCount && "admin" != loginInfo.Username {
 		if err := fcw.inner.Lock(loginInfo.Username); err != nil {
-			fcw.logger.Println("lock", loginInfo.Username, "fail,", err)
+			fcw.logger.Info("lock user fail", log.String("username", loginInfo.Username), log.Error(err))
 		}
 	}
 }
@@ -105,7 +106,7 @@ var createFailCounter = func() FailCounter {
 	return &memFailCounter{users: map[string]int{}}
 }
 
-func FailCounterWrap(um UserManager, maxLoginFailCount int, logger *log.Logger) UserManager {
+func FailCounterWrap(um UserManager, maxLoginFailCount int, logger log.Logger) UserManager {
 	if maxLoginFailCount <= 0 {
 		maxLoginFailCount = 3
 	}

@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log"
 	"strings"
 	"time"
+
+	"github.com/runner-mei/log"
 )
 
 type SessionInfo struct {
@@ -202,7 +203,7 @@ func CreateDbSession(dbType string, db *sql.DB, params map[string]interface{}) (
 }
 
 type onlineWrapper struct {
-	logger        *log.Logger
+	logger        log.Logger
 	inner         UserManager
 	online        Sessions
 	loginConflict string
@@ -260,7 +261,7 @@ func (ow *onlineWrapper) Auth(ctx context.Context, auth Authentication, loginInf
 	return ow.inner.Auth(ctx, auth, loginInfo)
 }
 
-func OnlineWrap(um UserManager, online Sessions, loginConflict string, logger *log.Logger) (UserManager, error) {
+func OnlineWrap(um UserManager, online Sessions, loginConflict string, logger log.Logger) (UserManager, error) {
 	if online == nil {
 		return um, nil
 	}

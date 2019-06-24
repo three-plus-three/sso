@@ -51,6 +51,14 @@ func MakeTestConfig() *Config {
 
 	return config
 }
+func MakeDbConfig() *DbConfig {
+
+	return &DbConfig{
+		DbType: *dbType,
+		DbURL:  *dbURL}
+
+	return config
+}
 
 var (
 	adminPWD   = "admin"
