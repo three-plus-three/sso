@@ -163,6 +163,9 @@ func (u *UserImpl) Auth(loginInfo *LoginInfo) (*UserInfo, error) {
 	}
 
 	if method != "" && method != "builin" {
+		if u.externalVerify == nil {
+			return nil, errors.New("externalVerify is disabled")
+		}
 		return u.externalVerify(method, u, loginInfo)
 	}
 
