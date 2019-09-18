@@ -16,7 +16,9 @@ import (
 type Ticket struct {
 	IsNew     bool
 	Ticket    string
+	UserID    interface{}
 	Username  string
+	Address   string
 	SessionID string
 	ExpiresAt time.Time
 	IssuedAt  time.Time
@@ -49,7 +51,7 @@ func (ticket *Ticket) Roles() []string {
 
 // TicketHandler 票据的管理
 type TicketHandler interface {
-	NewTicket(isNew bool, username string, data map[string]interface{}) (*Ticket, error)
+	NewTicket(isNew bool, userid interface{}, username, address string, data map[string]interface{}) (*Ticket, error)
 	ValidateTicket(ticket string, renew bool) (*Ticket, error)
 	RemoveTicket(ticket string) (*Ticket, error)
 }
@@ -145,7 +147,7 @@ type jwtTicketHandler struct {
 	keyFunc         func(t *jwt.Token) (interface{}, error)
 }
 
-func (jh *jwtTicketHandler) NewTicket(isNew bool, username string, data map[string]interface{}) (*Ticket, error) {
+func (jh *jwtTicketHandler) NewTicket(isNew bool, userid interface{}, username, address string, data map[string]interface{}) (*Ticket, error) {
 	issuedAt := time.Now()
 	expiredAt := issuedAt.Add(jh.expiredInternal)
 
@@ -162,6 +164,7 @@ func (jh *jwtTicketHandler) NewTicket(isNew bool, username string, data map[stri
 
 	res := map[string]interface{}{
 		"uuid":       uuid,
+		"userid":     userid,
 		"username":   username,
 		"expired_at": expiredAt,
 		"issued_at":  issuedAt,
@@ -204,7 +207,9 @@ func (jh *jwtTicketHandler) NewTicket(isNew bool, username string, data map[stri
 	ticketObject := &Ticket{
 		IsNew:     isNew,
 		Ticket:    t,
+		UserID:    userid,
 		Username:  username,
+		Address:   address,
 		ExpiresAt: expiredAt,
 		IssuedAt:  issuedAt,
 		Data:      res,

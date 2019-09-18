@@ -626,7 +626,7 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	ticket, err := srv.tickets.NewTicket(userinfo.IsNew, userinfo.Username, userinfo.Data)
+	ticket, err := srv.tickets.NewTicket(userinfo.IsNew, userinfo.ID, userinfo.Username, userinfo.Address, userinfo.Data)
 	if err != nil {
 		srv.logger.Println("内部生成 ticket 失败 -", err)
 
@@ -748,9 +748,13 @@ func (srv *Server) verifyTicket(c echo.Context) error {
 		srv.logger.Println("验证 ticket 失败 -", err)
 		return echo.NewHTTPError(http.StatusUnauthorized, "验证 ticket 失败 - "+err.Error())
 	}
+
 	if ticket == nil {
 		return c.JSON(http.StatusOK, map[string]interface{}{"ticket": serviceTicket, "valid": false})
 	}
+
+	srv.Online.Login(ticket.UserID, ticket.Address, "")
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"ticket":     serviceTicket,
 		"username":   ticket.Username,
