@@ -686,12 +686,16 @@ func (srv *Server) logout(c echo.Context) error {
 			srv.logger.Println("删除 ticket 失败 -", err)
 			return echo.NewHTTPError(http.StatusUnauthorized, "删除 ticket 失败 - "+err.Error())
 		}
+
 	} else {
 		srv.logger.Println("ticket 不存在")
 	}
 
 	if ticket != nil {
-		err := srv.Online.Logout(ticket.SessionID)
+		if ticket.Address == "" {
+			ticket.Address = c.RealIP()
+		}
+		err := srv.Online.LogoutBy(ticket.UserID, ticket.Username, ticket.Address)
 		if err != nil {
 			srv.logger.Println("删除 在线用户 失败 -", err)
 		}

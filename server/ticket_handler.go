@@ -248,14 +248,6 @@ func (jh *jwtTicketHandler) ValidateTicket(ticketString string, renew bool) (*Ti
 }
 
 func (jh *jwtTicketHandler) RemoveTicket(ticketString string) (*Ticket, error) {
-	// claims := &jwt.StandardClaims{}
-	// token, err := jwt.ParseWithClaims(ticketString, claims, jh.keyFunc)
-	// if err != nil {
-	// 	return errors.New("无效的 ticket - " + err.Error())
-	// }
-	// if !token.Valid {
-	// 	return nil
-	// }
 
 	var ticket *Ticket
 	jh.ticketMutex.Lock()
@@ -264,6 +256,20 @@ func (jh *jwtTicketHandler) RemoveTicket(ticketString string) (*Ticket, error) {
 		delete(jh.tickets, ticketString)
 	}
 	jh.ticketMutex.Unlock()
+
+	if ticket == nil {
+		claims := &jwt.StandardClaims{}
+		_, err := jwt.ParseWithClaims(ticketString, claims, jh.keyFunc)
+		if err != nil {
+			return nil, errors.New("无效的 ticket - " + err.Error())
+		}
+
+		return &Ticket{
+			Ticket:   ticketString,
+			UserID:   nil,
+			Username: claims.Audience,
+		}, nil
+	}
 
 	return ticket, nil
 }

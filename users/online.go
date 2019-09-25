@@ -24,6 +24,8 @@ type Sessions interface {
 	Login(userid interface{}, address, service string) (string, error)
 	Logout(key string) error
 
+	LogoutBy(userid interface{}, username string, address string) error
+
 	Query(username string) ([]SessionInfo, error)
 }
 
@@ -35,6 +37,11 @@ func (sess EmptySessions) Login(userid interface{}, address, service string) (st
 func (sess EmptySessions) Logout(key string) error {
 	return nil
 }
+
+func (sess EmptySessions) LogoutBy(userid interface{}, username, address string) error {
+	return nil
+}
+
 func (sess EmptySessions) Query(username string) ([]SessionInfo, error) {
 	return nil, nil
 }
@@ -148,6 +155,22 @@ func (do *DbOnline) Login(userid interface{}, address, service string) (string, 
 func (do *DbOnline) Logout(key string) error {
 	_, err := do.Db.Exec(do.deleteSQL, key)
 	return err
+}
+
+func (do *DbOnline) LogoutBy(userid interface{}, username, address string) error {
+	sessList, err := do.Query(username)
+	if err != nil {
+		return err
+	}
+	for _, sess := range sessList {
+		if sess.Address == address {
+			_, err = do.Db.Exec(do.deleteSQL, sess.UUID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func CreateDbSession(dbType string, db *sql.DB, params map[string]interface{}) (*DbOnline, error) {
