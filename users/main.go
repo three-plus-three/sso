@@ -34,9 +34,12 @@ type LoginContext struct {
 type AuthStep int
 
 const (
-	BeforeAuth AuthStep = iota
+	BeforeLoad AuthStep = iota
+	Loading
+	AfterLoaded
+	BeforeAuth
 	Authing
-	AfterAuth
+	AfterAuthed
 )
 
 type AuthContext struct {
@@ -63,10 +66,10 @@ type AuthService struct {
 	beforeLoadFuncs []AuthFunc
 	loadFuncs       []func(*AuthContext) (bool, error)
 	afterLoadFuncs  []AuthFunc
-	// beforeAuthFuncs []AuthFunc
-	// authFuncs       []AuthFunc
-	// afterAuthFuncs  []AuthFunc
-	errFuncs []func(ctx *AuthContext, err error) error
+	beforeAuthFuncs []AuthFunc
+	authFuncs       []AuthFunc
+	afterAuthFuncs  []AuthFunc
+	errFuncs        []func(ctx *AuthContext, err error) error
 }
 
 func (as *AuthService) OnBeforeLoad(cb AuthFunc) {
@@ -78,22 +81,21 @@ func (as *AuthService) OnLoad(cb func(*AuthContext) (bool, error)) {
 func (as *AuthService) OnAfterLoad(cb AuthFunc) {
 	as.afterLoadFuncs = append(as.afterLoadFuncs, cb)
 }
-
-// func (as *AuthService) OnBeforeAuth(cb AuthFunc) {
-// 	as.beforeAuthFuncs = append(as.beforeAuthFuncs, cb)
-// }
-// func (as *AuthService) OnAuth(cb AuthFunc) {
-// 	as.authFuncs = append(as.authFuncs, cb)
-// }
-// func (as *AuthService) OnAfterAuth(cb AuthFunc) {
-// 	as.afterAuthFuncs = append(as.afterAuthFuncs, cb)
-// }
+func (as *AuthService) OnBeforeAuth(cb AuthFunc) {
+	as.beforeAuthFuncs = append(as.beforeAuthFuncs, cb)
+}
+func (as *AuthService) OnAuth(cb AuthFunc) {
+	as.authFuncs = append(as.authFuncs, cb)
+}
+func (as *AuthService) OnAfterAuth(cb AuthFunc) {
+	as.afterAuthFuncs = append(as.afterAuthFuncs, cb)
+}
 func (as *AuthService) OnError(cb func(ctx *AuthContext, err error) error) {
 	as.errFuncs = append(as.errFuncs, cb)
 }
 func (as *AuthService) Login(lctx *LoginContext) (*LoginResult, error) {
 	ctx := &AuthContext{
-		Step:    BeforeAuth,
+		Step:    BeforeLoad,
 		Context: lctx,
 		Result:  &LoginResult{},
 	}
@@ -103,7 +105,7 @@ func (as *AuthService) Login(lctx *LoginContext) (*LoginResult, error) {
 		}
 	}
 
-	ctx.Step = Authing
+	ctx.Step = Loading
 
 	isLoaded := false
 	for _, a := range as.loadFuncs {
@@ -119,29 +121,30 @@ func (as *AuthService) Login(lctx *LoginContext) (*LoginResult, error) {
 	if !isLoaded {
 		return as.callError(ctx, ErrUserNotFound)
 	}
-
-	ctx.Step = AfterAuth
-
+	ctx.Step = AfterLoaded
 	for _, a := range as.afterLoadFuncs {
 		if err := a(ctx); err != nil {
 			return as.callError(ctx, err)
 		}
 	}
-	// for _, a := range as.beforeAuthFuncs {
-	// 	if err := a(ctx); err != nil {
-	// 		return as.callError(ctx, err)
-	// 	}
-	// }
-	// for _, a := range as.authFuncs {
-	// 	if err := a(ctx); err != nil {
-	// 		return as.callError(ctx, err)
-	// 	}
-	// }
-	// for _, a := range as.afterAuthFuncs {
-	// 	if err := a(ctx); err != nil {
-	// 		return as.callError(ctx, err)
-	// 	}
-	// }
+	ctx.Step = BeforeAuth
+	for _, a := range as.beforeAuthFuncs {
+		if err := a(ctx); err != nil {
+			return as.callError(ctx, err)
+		}
+	}
+	ctx.Step = Authing
+	for _, a := range as.authFuncs {
+		if err := a(ctx); err != nil {
+			return as.callError(ctx, err)
+		}
+	}
+	ctx.Step = AfterAuthed
+	for _, a := range as.afterAuthFuncs {
+		if err := a(ctx); err != nil {
+			return as.callError(ctx, err)
+		}
+	}
 
 	return ctx.Result, nil
 }
