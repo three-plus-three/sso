@@ -1,7 +1,6 @@
 package echo_sso
 
 import (
-	"fmt"
 	"hash"
 	"log"
 	"net/http"
@@ -58,7 +57,7 @@ type Handlers struct {
 	Logout     echo.HandlerFunc
 }
 
-func SSOHandlers(ssoClient *sso.Client, sessionKey, sessionPath string, h func() hash.Hash, secretKey []byte, currentURL func(*http.Request) url.URL) Handlers {
+func SSOHandlers(sessionKey, sessionPath string, h func() hash.Hash, secretKey []byte, currentURL func(*http.Request) url.URL) Handlers {
 	if sessionPath == "" {
 		sessionPath = "/" // 必须指定 Path, 否则会被自动赋成当前请求的 url 中的 path
 	} else if !strings.HasPrefix(sessionPath, "/") {
@@ -96,30 +95,30 @@ func SSOHandlers(ssoClient *sso.Client, sessionKey, sessionPath string, h func()
 	}
 
 	login := func(c echo.Context) error {
-		serviceTicket := c.QueryParam("ticket")
-		if serviceTicket == "" {
-			return echo.ErrUnauthorized
-		}
+		// serviceTicket := c.QueryParam("ticket")
+		// if serviceTicket == "" {
+		// 	return echo.ErrUnauthorized
+		// }
 
-		currentRequestURL := currentURL(c.Request())
-		ticket, err := ssoClient.ValidateTicket(serviceTicket, currentRequestURL.String())
-		if err != nil {
-			return err
-		}
+		// currentRequestURL := currentURL(c.Request())
+		// ticket, err := ssoClient.ValidateTicket(serviceTicket, currentRequestURL.String())
+		// if err != nil {
+		// 	return err
+		// }
 
-		var values = url.Values{}
-		for k, v := range ticket.Claims {
-			values.Set(k, fmt.Sprint(v))
-		}
-		values.Set(sso.SESSION_ID_KEY, ticket.SessionID)
-		values.Set(sso.SESSION_EXPIRE_KEY, "session")
-		values.Set(sso.SESSION_VALID_KEY, "true")
-		if user, ok := ticket.Claims["username"]; ok {
-			values.Set(sso.SESSION_USER_KEY, fmt.Sprint(user))
-		}
-		c.SetCookie(&http.Cookie{Name: sessionKey,
-			Value: sso.Encode(values, h, secretKey),
-			Path:  sessionPath})
+		// var values = url.Values{}
+		// for k, v := range ticket.Claims {
+		// 	values.Set(k, fmt.Sprint(v))
+		// }
+		// values.Set(sso.SESSION_ID_KEY, ticket.SessionID)
+		// values.Set(sso.SESSION_EXPIRE_KEY, "session")
+		// values.Set(sso.SESSION_VALID_KEY, "true")
+		// if user, ok := ticket.Claims["username"]; ok {
+		// 	values.Set(sso.SESSION_USER_KEY, fmt.Sprint(user))
+		// }
+		// c.SetCookie(&http.Cookie{Name: sessionKey,
+		// 	Value: sso.Encode(values, h, secretKey),
+		// 	Path:  sessionPath})
 
 		service := c.QueryParam("return")
 		if service != "" {

@@ -2,9 +2,6 @@ package revel_sso
 
 import (
 	"errors"
-	"fmt"
-	"log"
-	"net/http"
 	"net/url"
 	"time"
 
@@ -26,34 +23,16 @@ func SSO(ssoClient *sso.Client, maxAge time.Duration, getURL func(u *url.URL, ct
 				currentURL = *c.Request.URL
 			}
 
-			serviceTicket := c.Params.Query.Get("ticket")
-			if serviceTicket == "" {
-				//c.RenderArgs["error"] = "ticket 为空"
-				//return c.RenderError(errors.New("访问授权系统失败 - 会话已注销"))
-				s := ssoClient.LoginURL(currentURL.String())
-				u, err := url.Parse(s)
-				if err != nil {
-					return c.RenderError(errors.New("SSO 的 URL 是无效的，" + err.Error() + "\r\n" + s))
-				}
-				u.Scheme = currentURL.Scheme
-				u.Host = currentURL.Host
-				u.User = currentURL.User
-				u.Opaque = currentURL.Opaque
-				return c.Redirect(u.String())
-			}
-
-			ticket, err := ssoClient.ValidateTicket(serviceTicket, currentURL.String())
+			s := ssoClient.LoginURL(currentURL.String())
+			u, err := url.Parse(s)
 			if err != nil {
-				err = errors.New("验证 ticket 失败，" + err.Error())
-				log.Println(err)
-				c.Response.Status = http.StatusForbidden
-				return c.RenderError(err)
+				return c.RenderError(errors.New("SSO 的 URL 是无效的，" + err.Error() + "\r\n" + s))
 			}
-
-			c.Session[sso.SESSION_VALID_KEY] = "true"
-			if user, ok := ticket.Claims["username"]; ok && user != nil {
-				c.Session[sso.SESSION_USER_KEY] = fmt.Sprint(user)
-			}
+			u.Scheme = currentURL.Scheme
+			u.Host = currentURL.Host
+			u.User = currentURL.User
+			u.Opaque = currentURL.Opaque
+			return c.Redirect(u.String())
 		}
 		return nil
 	}

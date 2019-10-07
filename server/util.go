@@ -21,3 +21,5 @@ func RealIP(req *http.Request) string {
 	}
 	return ra
 }
+
+var localAddressList, _ = net.LookupHost("localhost")

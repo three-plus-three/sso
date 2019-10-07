@@ -18,11 +18,12 @@ var ErrCookieEmpty = errors.New("session cookie is empty")
 
 const (
 	// DefaultSessionKey default key value
-	DefaultSessionKey  = "PLAY_SESSION"
-	SESSION_ID_KEY     = "session_id"
-	SESSION_VALID_KEY  = "_valid"
-	SESSION_USER_KEY   = "user"
-	SESSION_EXPIRE_KEY = "_expire"
+	DefaultSessionKey     = "PLAY_SESSION"
+	SESSION_ID_KEY        = "session_id"
+	SESSION_VALID_KEY     = "_valid"
+	SESSION_USER_KEY      = "user"
+	SESSION_EXPIRE_KEY    = "_expire"
+	SESSION_ISSUED_AT_KEY = "issued_at"
 )
 
 func SessionIsExpiredOrMissing(exp string) bool {

@@ -2,7 +2,6 @@ package client
 
 import (
 	"crypto/sha1"
-	"fmt"
 	"hash"
 	"log"
 	"net/http"
@@ -22,10 +21,10 @@ type Option struct {
 }
 
 func SSO(opt *Option) func(w http.ResponseWriter, req *http.Request, noAuth, next http.Handler) {
-	ssoClient, err := NewClient(opt.URL)
-	if err != nil {
-		panic(err)
-	}
+	// ssoClient, err := NewClient(opt.URL)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	sessionKey := opt.SessionKey
 	if sessionKey == "" {
@@ -55,43 +54,7 @@ func SSO(opt *Option) func(w http.ResponseWriter, req *http.Request, noAuth, nex
 	return func(w http.ResponseWriter, req *http.Request, noAuth, next http.Handler) {
 		sess, err := GetValues(req, sessionKey, h, secretKey)
 		if err != nil {
-			queryParam := req.URL.Query()
-			serviceTicket := queryParam.Get("ticket")
-			if serviceTicket == "" {
-				log.Println("fetch session fail,", err)
-				noAuth.ServeHTTP(w, req)
-				return
-			}
-
-			currentRequestURL := currentURL(req)
-			ticket, err := ssoClient.ValidateTicket(serviceTicket, currentRequestURL.String())
-			if err != nil {
-				log.Println("validate ticket fail,", err, currentRequestURL.String())
-				noAuth.ServeHTTP(w, req)
-				return
-			}
-
-			var values = url.Values{}
-			for k, v := range ticket.Claims {
-				values.Set(k, fmt.Sprint(v))
-			}
-			values.Set(SESSION_ID_KEY, ticket.SessionID)
-			values.Set(SESSION_EXPIRE_KEY, "session")
-			values.Set(SESSION_VALID_KEY, "true")
-			if user, ok := ticket.Claims["username"]; ok {
-				values.Set(SESSION_USER_KEY, fmt.Sprint(user))
-			}
-
-			http.SetCookie(w, &http.Cookie{Name: sessionKey,
-				Value: Encode(values, h, secretKey),
-				Path:  sessionPath})
-
-			service := queryParam.Get("return")
-			if service != "" {
-				http.Redirect(w, req, service, http.StatusTemporaryRedirect)
-				return
-			}
-			next.ServeHTTP(w, req)
+			noAuth.ServeHTTP(w, req)
 			return
 		}
 

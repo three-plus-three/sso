@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"github.com/labstack/echo"
-	"github.com/three-plus-three/sso/client"
 )
 
 type (
@@ -18,7 +17,7 @@ type (
 // - "query"
 // - "cookie"
 // - "query_and_cookie"
-func SSOWithConfig(lookup, name, service string, ssoClient *client.Client) echo.MiddlewareFunc {
+func SSOWithConfig(lookup, name, service string) echo.MiddlewareFunc {
 	if lookup == "" {
 		lookup = "query_and_cookie"
 	}
@@ -27,33 +26,33 @@ func SSOWithConfig(lookup, name, service string, ssoClient *client.Client) echo.
 		name = "ticket"
 	}
 
-	var extractor = keyFromQuery(name)
-	switch lookup {
-	case "query":
-		extractor = keyFromQuery(name)
-	case "cookie":
-		extractor = keyFromCookie(name)
-	case "query_and_cookie":
-		extractor = keyFromQueryAndCookie(name)
-	}
+	// var extractor = keyFromQuery(name)
+	// switch lookup {
+	// case "query":
+	// 	extractor = keyFromQuery(name)
+	// case "cookie":
+	// 	extractor = keyFromCookie(name)
+	// case "query_and_cookie":
+	// 	extractor = keyFromQueryAndCookie(name)
+	// }
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			auth, err := extractor(c)
-			if err != nil {
-				return echo.NewHTTPError(echo.ErrUnauthorized.Code, err.Error())
-			}
+			// auth, err := extractor(c)
+			// if err != nil {
+			// 	return echo.NewHTTPError(echo.ErrUnauthorized.Code, err.Error())
+			// }
 
-			ticket, err := ssoClient.ValidateTicket(auth, service)
-			if err != nil {
-				if e, ok := err.(*client.Error); ok {
-					return echo.NewHTTPError(e.Code, e.Message)
-				}
-				return echo.NewHTTPError(echo.ErrUnauthorized.Code, err.Error())
-			}
-			if ticket.Valid {
-				return next(c)
-			}
+			// ticket, err := ssoClient.ValidateTicket(auth, service)
+			// if err != nil {
+			// 	if e, ok := err.(*client.Error); ok {
+			// 		return echo.NewHTTPError(e.Code, e.Message)
+			// 	}
+			// 	return echo.NewHTTPError(echo.ErrUnauthorized.Code, err.Error())
+			// }
+			// if ticket.Valid {
+			// 	return next(c)
+			// }
 			return echo.ErrUnauthorized
 		}
 	}

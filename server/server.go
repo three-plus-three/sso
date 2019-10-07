@@ -2,7 +2,12 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"crypto/md5"
+	"crypto/sha1"
 	"errors"
+	"fmt"
+	"hash"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -11,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +25,7 @@ import (
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	"github.com/mojocn/base64Captcha"
+	"github.com/three-plus-three/sso/client"
 	"github.com/three-plus-three/sso/users"
 )
 
@@ -72,18 +79,35 @@ type ErrExternalServer = users.ErrExternalServer
 
 var IsErrExternalServer = users.IsErrExternalServer
 
-// TicketGetter 从请求中获取票据
-type TicketGetter func(c echo.Context) string
+type AuthResult struct {
+	SessionID string
+	IsNewUser bool
+	Data      map[string]interface{}
+}
 
-type VerifyFunc = users.VerifyFunc
+type AuthFunc func(*LoginContext) error
 
-type UserNotFound = users.UserNotFound
+type LoginContext struct {
+	Context context.Context
 
-// DbConfig 服务的数据库配置项
-type DbConfig = users.DbConfig
+	UserID       interface{} `json:"userid" xml:"userid" form:"-" query:"-"`
+	Username     string      `json:"username" xml:"username" form:"username" query:"username"`
+	Password     string      `json:"password" xml:"password" form:"password" query:"password"`
+	Service      string      `json:"service" xml:"service" form:"service" query:"service"`
+	ForceLogin   string      `json:"force,omitempty" xml:"force" form:"force" query:"force"`
+	CaptchaKey   string      `json:"captcha_key,omitempty" xml:"captcha_key" form:"captcha_key" query:"captcha_key"`
+	CaptchaValue string      `json:"captcha_value,omitempty" xml:"captcha_value" form:"captcha_value" query:"captcha_value"`
 
-type LockedUser = users.LockedUser
-type UserManager = users.UserManager
+	Address   string
+	NoCaptcha bool
+
+	Authentication AuthFunc
+}
+
+type SessionManager interface {
+	Login(ctx *LoginContext) (*AuthResult, error)
+	Logout(sessonID, username, loginAddress string)
+}
 
 // Config 服务的配置项
 type Config struct {
@@ -98,10 +122,13 @@ type Config struct {
 	LogoPath        string
 	TampletePaths   []string
 
-	CookieDomain   string
-	CookiePath     string
-	CookieSecure   bool
-	CookieHTTPOnly bool
+	SessionKey       string
+	SessionPath      string
+	SessionDomain    string
+	SessionSecure    bool
+	SessionHttpOnly  bool
+	SessionHashFunc  string
+	SessionSecretKey []byte
 
 	NewUserURL       string
 	WelcomeURL       string
@@ -110,200 +137,25 @@ type Config struct {
 
 	ListenAt string
 
-	TicketLookup   string
-	TicketProtocol string
-	TicketConfig   map[string]interface{}
-}
-
-// CreateServer 创建一个 sso 服务
-func CreateServer(config *Config, userManager UserManager, online users.Sessions) (*Server, error) {
-	if strings.HasSuffix(config.URLPrefix, "/") {
-		config.URLPrefix = strings.TrimSuffix(config.URLPrefix, "/")
-	}
-	if config.CookiePath == "" {
-		config.CookiePath = "/"
-	} else if !strings.HasPrefix(config.CookiePath, "/") {
-		config.CookiePath = "/" + config.CookiePath
-	}
-
-	templateBox, err := rice.FindBox("static")
-	if err != nil {
-		return nil, errors.New("load static directory fail, " + err.Error())
-	}
-
-	tokenName := "token"
-	ticketGetter := ticketFromQueryAndCookie(tokenName)
-	if config.TicketLookup != "" {
-		parts := strings.Split(config.TicketLookup, ":")
-		if len(parts) != 2 {
-			return nil, errors.New("TicketLookup(" + config.TicketLookup + ") is invalid")
-		}
-
-		tokenName = parts[1]
-		switch parts[0] {
-		case "query":
-			ticketGetter = ticketFromQuery(parts[1])
-		case "cookie":
-			ticketGetter = ticketFromCookie(parts[1])
-		case "header":
-			ticketGetter = ticketFromHeader(parts[1])
-		case "query_and_cookie":
-			ticketGetter = ticketFromQueryAndCookie(parts[1])
-		}
-	}
-
-	logger := log.New(os.Stderr, "[sso] ", log.LstdFlags|log.Lshortfile)
-
-	// UserConfig     interface{}
-	// AuthConfig     interface{}
-
-	//	userManager, online, err := DefaultUserHandler(config, logger)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-
-	factory := TicketHandlerFactories[config.TicketProtocol]
-	if factory == nil {
-		return nil, errors.New("protocl '" + config.TicketProtocol + "' is unsupported.")
-	}
-	ticketHandler, err := factory(config.TicketConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	variables := map[string]interface{}{}
-	variables["url_prefix"] = config.URLPrefix
-	variables["play_path"] = config.PlayPath
-	variables["application_context"] = config.URLPrefix
-
-	variables["client_title_text"] = config.ClientTitleText
-	variables["header_title_text"] = config.HeaderTitleText
-	variables["footer_title_text"] = config.FooterTitleText
-	variables["logo_png"] = config.LogoPath
-	variables["new_user_url"] = config.NewUserURL
-
-	// Echo instance
-	e := echo.New()
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
-	e.Use(middleware.MethodOverrideWithConfig(middleware.MethodOverrideConfig{
-		Getter: func(c echo.Context) string {
-			m := c.FormValue("_method")
-			if m != "" {
-				return m
-			}
-			return c.QueryParam("_method")
-		}}))
-	srv := &Server{
-		engine:         e,
-		cookieDomain:   config.CookieDomain,
-		cookiePath:     config.CookiePath,
-		cookieSecure:   config.CookieSecure,
-		cookieHTTPOnly: config.CookieHTTPOnly,
-		theme:          config.Theme,
-		urlPrefix:      config.URLPrefix,
-		welcomeURL:     config.WelcomeURL,
-		UserManager:    userManager,
-		Online:         online,
-		tokenName:      tokenName,
-		ticketGetter:   ticketGetter,
-		tickets:        ticketHandler,
-		authenticatingTickets: authenticatingTickets{
-			timeout: 1 * time.Minute,
-			tickets: map[string]*authenticatingTicket{},
-		},
-		logger: logger,
-		redirect: func(c echo.Context, toURL string) error {
-			return c.Redirect(http.StatusTemporaryRedirect, toURL)
-		},
-		captcha:          config.Captcha,
-		data:             variables,
-		cookiesForLogout: config.CookiesForLogout,
-	}
-
-	if config.RedirectMode == "html" {
-		srv.redirect = func(c echo.Context, toURL string) error {
-			data := map[string]interface{}{
-				"global":    srv.data,
-				"returnURL": toURL,
-			}
-			return c.Render(http.StatusOK, "success.html", data)
-		}
-	}
-
-	if len(config.TampletePaths) == 0 {
-		config.TampletePaths = append(config.TampletePaths, filepath.Join("lib/web/sso"))
-	}
-	srv.engine.Renderer = &renderer{
-		srv:           srv,
-		templates:     map[string]*template.Template{},
-		templateRoots: config.TampletePaths,
-		templateBox:   templateBox,
-	}
-
-	fs := http.FileServer(templateBox.HTTPBox())
-	assetHandler := http.StripPrefix(config.URLPrefix+"/static/",
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			upath := r.URL.Path
-			if strings.HasPrefix(upath, "/") {
-				upath = strings.TrimPrefix(upath, "/")
-			}
-			for _, root := range config.TampletePaths {
-				filename := filepath.Join(root, "static", upath)
-				if _, err := os.Stat(filename); err == nil {
-					http.ServeFile(w, r, filename)
-					return
-				}
-			}
-
-			fs.ServeHTTP(w, r)
-		}))
-
-	srv.engine.GET(config.URLPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.URLPrefix, http.DefaultServeMux)))
-	srv.engine.GET(config.URLPrefix+"/static/*", echo.WrapHandler(assetHandler))
-	srv.engine.GET(config.URLPrefix+"/login", srv.loginGet)
-	srv.engine.POST(config.URLPrefix+"/login", srv.login)
-	srv.engine.POST(config.URLPrefix+"/logout", srv.logout)
-	srv.engine.GET(config.URLPrefix+"/logout", srv.logout)
-	//srv.engine.GET("/auth", srv.getTicket)
-	srv.engine.GET(config.URLPrefix+"/verify", srv.verifyTicket)
-	//srv.engine.POST("/verify", srv.verifyTickets)
-
-	srv.engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
-	srv.engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
-
-	srv.engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(users.GenerateCaptcha(config.Captcha))))
-	// srv.engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
-
-	return srv, nil
+	// TicketLookup   string
+	// TicketProtocol string
+	// TicketConfig   map[string]interface{}
 }
 
 // Server SSO 服务器
 type Server struct {
-	engine                *echo.Echo
-	theme                 string
-	cookieDomain          string
-	cookiePath            string
-	cookieSecure          bool
-	cookieHTTPOnly        bool
-	urlPrefix             string
-	welcomeURL            string
-	tokenName             string
-	UserManager           users.UserManager
-	Online                users.Sessions
-	tickets               TicketHandler
-	ticketGetter          TicketGetter
-	authenticatingTickets authenticatingTickets
-	logger                *log.Logger
-	captcha               interface{}
-	redirect              func(c echo.Context, url string) error
-	data                  map[string]interface{}
-
-	cookiesForLogout []*http.Cookie
+	engine         *echo.Echo
+	config         Config
+	sessonHashFunc func() hash.Hash
+	sessionMgr     SessionManager
+	logger         *log.Logger
+	captcha        interface{}
+	redirect       func(c echo.Context, url string) error
+	data           map[string]interface{}
 }
 
 func (srv *Server) Route() *echo.Group {
-	return srv.engine.Group(srv.urlPrefix)
+	return srv.engine.Group(srv.config.URLPrefix)
 }
 
 type renderer struct {
@@ -320,7 +172,7 @@ func (r *renderer) Render(wr io.Writer, name string, data interface{}, c echo.Co
 	if name == "login.html" {
 		theme := c.QueryParam("theme")
 		if theme == "" {
-			theme = r.srv.theme
+			theme = r.srv.config.Theme
 		}
 
 		if theme != "" {
@@ -430,64 +282,20 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	srv.engine.ServeHTTP(w, r)
 }
 
-func (srv *Server) lockedUsers(c echo.Context) error {
-	ticketString := srv.ticketGetter(c)
-	if ticketString == "" {
-		return c.String(http.StatusUnauthorized, "Unauthorized")
-	}
-
-	_, err := srv.tickets.ValidateTicket(ticketString, true)
-	if err != nil {
-		return c.String(http.StatusUnauthorized, err.Error())
-	}
-
-	return srv.lockedUsersWithError(c, nil)
-}
-
-func (srv *Server) lockedUsersWithError(c echo.Context, unlocked error) error {
-	users, err := srv.UserManager.Locked()
-	data := map[string]interface{}{"global": srv.data,
-		"users": users}
-	if err != nil {
-		data["error"] = err.Error()
-	}
-	if unlocked != nil {
-		data["error"] = unlocked.Error()
-	}
-
-	return c.Render(http.StatusOK, "locked_users.html", data)
-}
-
-func (srv *Server) userUnlock(c echo.Context) error {
-	ticketString := srv.ticketGetter(c)
-	if ticketString == "" {
-		return c.String(http.StatusUnauthorized, "Unauthorized")
-	}
-
-	_, err := srv.tickets.ValidateTicket(ticketString, true)
-	if err != nil {
-		return c.String(http.StatusUnauthorized, err.Error())
-	}
-
-	username := c.QueryParam("username")
-	err = srv.UserManager.Unlock(username)
-	return srv.lockedUsersWithError(c, err)
-}
-
 func (srv *Server) loginGet(c echo.Context) error {
-	ticketString := srv.ticketGetter(c)
-	if ticketString != "" {
-		ticket, err := srv.tickets.ValidateTicket(ticketString, true)
-		if err == nil && ticket != nil {
+	// ticketString := srv.ticketGetter(c)
+	// if ticketString != "" {
+	// 	ticket, err := srv.tickets.ValidateTicket(ticketString, true)
+	// 	if err == nil && ticket != nil {
 
-			service := c.QueryParam("service")
-			if service == "" {
-				service = srv.welcomeURL
-			}
+	// 		service := c.QueryParam("service")
+	// 		if service == "" {
+	// 			service = srv.welcomeURL
+	// 		}
 
-			return srv.loginOK(c, ticket, service)
-		}
-	}
+	// 		return srv.loginOK(c, ticket, service)
+	// 	}
+	// }
 
 	method := c.QueryParam("_method")
 	if method == "POST" {
@@ -496,7 +304,7 @@ func (srv *Server) loginGet(c echo.Context) error {
 
 	service := c.QueryParam("service")
 	if service == "" {
-		service = srv.welcomeURL
+		service = srv.config.WelcomeURL
 	}
 	data := map[string]interface{}{"global": srv.data,
 		"service": service}
@@ -566,7 +374,7 @@ func (srv *Server) alreadyLoginOnOtherHost(c echo.Context, loginInfo users.Login
 }
 
 func (srv *Server) login(c echo.Context) error {
-	var loginInfo users.LoginInfo
+	var loginInfo LoginContext
 	if err := c.Bind(&loginInfo); err != nil {
 		srv.logger.Println("登录数据的格式不正确 -", err)
 
@@ -587,11 +395,12 @@ func (srv *Server) login(c echo.Context) error {
 		return srv.relogin(c, loginInfo, "请输入用户名", nil)
 	}
 
+	loginInfo.Context = c.Request().Context()
 	loginInfo.NoCaptcha = false
 	loginInfo.Address = RealIP(c.Request())
 
-	userinfo, err := users.Auth(c.Request().Context(), srv.UserManager, &loginInfo)
-	if err != nil || userinfo == nil {
+	loginResult, err := srv.sessionMgr.Login(&loginInfo)
+	if err != nil || loginResult == nil {
 		if err == nil {
 			err = ErrUserNotFound
 		}
@@ -626,103 +435,96 @@ func (srv *Server) login(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	ticket, err := srv.tickets.NewTicket(userinfo.IsNew, userinfo.ID, userinfo.Username, userinfo.Address, userinfo.Data)
-	if err != nil {
-		srv.logger.Println("内部生成 ticket 失败 -", err)
+	var values = url.Values{}
 
-		if !isConsumeJSON(c) {
-			return srv.relogin(c, loginInfo, "", err)
+	for k, v := range loginResult.Data {
+		found := false
+		for _, s := range []string{
+			"uuid",
+			"username",
+			"password",
+			"name",
+			"expired_at",
+			"issued_at",
+			"admin"} {
+			if s == k {
+				found = true
+				break
+			}
 		}
-		return echo.ErrUnauthorized
+		if found {
+			continue
+		}
+		values.Set(k, fmt.Sprint(v))
 	}
 
-	return srv.loginOK(c, ticket, userinfo.Service)
-}
+	values.Set("issued_at", time.Now().Format(time.RFC3339))
+	values.Set(client.SESSION_ID_KEY, loginResult.SessonID)
+	values.Set(client.SESSION_EXPIRE_KEY, "session")
+	values.Set(client.SESSION_VALID_KEY, "true")
+	values.Set(client.SESSION_USER_KEY, loginInfo.Username)
 
-func (srv *Server) loginOK(c echo.Context, ticket *Ticket, service string) error {
-	serviceTicket := srv.authenticatingTickets.new(ticket, service)
-
-	c.SetCookie(&http.Cookie{Name: srv.tokenName,
-		Value: ticket.Ticket,
-		Path:  srv.cookiePath,
-		// Expires: ticket.ExpiresAt, // 不指定过期时间，那么关闭浏览器后 cookie 会删除
+	c.SetCookie(&http.Cookie{
+		Name:     srv.config.SessionKey,
+		Value:    client.Encode(values, srv.sessonHashFunc, srv.config.SessionSecretKey),
+		Domain:   srv.config.SessionDomain,
+		Path:     srv.config.SessionPath,
+		Secure:   srv.config.SessionSecure,
+		HttpOnly: srv.config.SessionHttpOnly,
 	})
-	if service != "" {
-		returnURL := service
-		u, err := url.Parse(returnURL)
-		if err == nil {
-			queryParams := u.Query()
-			queryParams.Set("ticket", serviceTicket)
-			// queryParams.Set("session_id", ticket.SessionID)
-			queryParams.Set("username", ticket.Username)
-			if ticket.IsNew {
-				queryParams.Set("is_new", "true")
-				if ss := ticket.Roles(); len(ss) > 0 {
-					queryParams["roles"] = ss
-				}
-			}
-			u.RawQuery = queryParams.Encode()
-			returnURL = u.String()
-		}
 
-		return srv.redirect(c, returnURL)
+	if loginInfo.Service != "" {
+		return srv.redirect(c, loginInfo.Service)
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"ticket":   serviceTicket,
-		"is_new":   ticket.IsNew,
-		"roles":    ticket.Roles(),
-		"username": ticket.Username,
+		"userid":     loginInfo.UserID,
+		"username":   loginInfo.Username,
+		"session_id": loginResult.SessionID,
+		"is_new":     loginResult.IsNew,
+		"roles":      loginResult.Roles(),
 	})
 }
 
 func (srv *Server) logout(c echo.Context) error {
-	var ticket *Ticket
-	ticketString := srv.ticketGetter(c)
-	if ticketString != "" {
-		var err error
-		ticket, err = srv.tickets.RemoveTicket(ticketString)
-		if err != nil {
-			srv.logger.Println("删除 ticket 失败 -", err)
-			return echo.NewHTTPError(http.StatusUnauthorized, "删除 ticket 失败 - "+err.Error())
-		}
-
-	} else {
-		srv.logger.Println("ticket 不存在")
+	values, err := client.GetValues(c.Request(),
+		srv.config.SessionKey, srv.sessonHashFunc(), srv.config.SessionSecretKey)
+	if err != nil {
+		log.Println("fetch session fail,", err)
+		return echo.ErrUnauthorized
 	}
 
-	if ticket != nil {
-		if ticket.Address == "" {
-			ticket.Address = c.RealIP()
-		}
-		err := srv.Online.LogoutBy(ticket.UserID, ticket.Username, ticket.Address)
-		if err != nil {
-			srv.logger.Println("删除 在线用户 失败 -", err)
-		}
+	sessionID := values.Get(client.SESSION_ID_KEY)
+	username := values.Get(client.SESSION_USER_KEY)
+	err = srv.sessionMgr.Logout(sessionID, username, c.RealIP())
+	if err != nil {
+		srv.logger.Println("删除 在线用户 失败 -", err)
 	}
 
-	c.SetCookie(&http.Cookie{Name: srv.tokenName,
-		Value:   "",
-		Path:    srv.cookiePath,
-		Expires: time.Now(),
-		MaxAge:  -1})
-	for _, cookie := range srv.cookiesForLogout {
-		c.SetCookie(&http.Cookie{Name: cookie.Name,
-			Value:    cookie.Value,
-			Domain:   cookie.Domain,
-			Path:     cookie.Path,
-			Secure:   cookie.Secure,
-			HttpOnly: cookie.HttpOnly,
-			Raw:      cookie.Raw,
-			Unparsed: cookie.Unparsed,
-			Expires:  time.Now(),
-			MaxAge:   -1})
+	values.Set(client.SESSION_EXPIRE_KEY, strconv.FormatInt(time.Now().Unix()-30*24*40, 10))
+	values.Set(client.SESSION_VALID_KEY, "false")
+	c.SetCookie(&http.Cookie{
+		Name:     srv.config.SessionKey,
+		Value:    client.Encode(values, srv.sessonHashFunc, srv.config.SessionSecretKey),
+		Domain:   srv.config.SessionDomain,
+		Path:     srv.config.SessionPath,
+		Secure:   srv.config.SessionSecure,
+		HttpOnly: srv.config.SessionHttpOnly,
+		Expires:  time.Now(),
+		MaxAge:   -1,
+	})
+	for _, cookie := range srv.config.CookiesForLogout {
+		a := &http.Cookie{}
+		*a = *cookie
+		a.Expires = time.Now()
+		a.MaxAge = -1
+		c.SetCookie(a)
 	}
 
 	returnURL := c.QueryParam("service")
 	if !isConsumeJSON(c) {
 		if returnURL == "" {
-			returnURL = srv.urlPrefix + "/login"
+			returnURL = srv.config.URLPrefix + "/login"
 		}
 	}
 
@@ -738,34 +540,6 @@ func (srv *Server) logout(c echo.Context) error {
 	}
 
 	return c.String(http.StatusOK, "OK")
-}
-
-func (srv *Server) verifyTicket(c echo.Context) error {
-	serviceTicket := c.QueryParam("ticket")
-	if serviceTicket == "" {
-		return echo.NewHTTPError(http.StatusUnauthorized, "ticket 不存在")
-	}
-	service := c.QueryParam("service")
-
-	ticket, err := srv.authenticatingTickets.fetchAndValidate(serviceTicket, service)
-	if err != nil {
-		srv.logger.Println("验证 ticket 失败 -", err)
-		return echo.NewHTTPError(http.StatusUnauthorized, "验证 ticket 失败 - "+err.Error())
-	}
-
-	if ticket == nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{"ticket": serviceTicket, "valid": false})
-	}
-
-	srv.Online.Login(ticket.UserID, ticket.Address, "")
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"ticket":     serviceTicket,
-		"username":   ticket.Username,
-		"session_id": ticket.SessionID,
-		"valid":      true,
-		"expires_at": ticket.ExpiresAt,
-		"claims":     ticket.Data})
 }
 
 // func (srv *Server) verifyTickets(c echo.Context) error {
@@ -793,43 +567,43 @@ func (srv *Server) verifyTicket(c echo.Context) error {
 // 	return c.JSON(http.StatusOK, results)
 // }
 
-func ticketFromQuery(name string) TicketGetter {
-	return func(c echo.Context) string {
-		return c.QueryParam(name)
-	}
-}
+// func ticketFromQuery(name string) TicketGetter {
+// 	return func(c echo.Context) string {
+// 		return c.QueryParam(name)
+// 	}
+// }
 
-func ticketFromCookie(name string) TicketGetter {
-	return func(c echo.Context) string {
-		cookie, err := c.Cookie(name)
-		if err != nil {
-			return ""
-		}
+// func ticketFromCookie(name string) TicketGetter {
+// 	return func(c echo.Context) string {
+// 		cookie, err := c.Cookie(name)
+// 		if err != nil {
+// 			return ""
+// 		}
 
-		return cookie.Value
-	}
-}
+// 		return cookie.Value
+// 	}
+// }
 
-func ticketFromQueryAndCookie(name string) TicketGetter {
-	return func(c echo.Context) string {
-		if value := c.QueryParam(name); value != "" {
-			return value
-		}
+// func ticketFromQueryAndCookie(name string) TicketGetter {
+// 	return func(c echo.Context) string {
+// 		if value := c.QueryParam(name); value != "" {
+// 			return value
+// 		}
 
-		cookie, err := c.Cookie(name)
-		if err != nil {
-			return ""
-		}
+// 		cookie, err := c.Cookie(name)
+// 		if err != nil {
+// 			return ""
+// 		}
 
-		return cookie.Value
-	}
-}
+// 		return cookie.Value
+// 	}
+// }
 
-func ticketFromHeader(header string) TicketGetter {
-	return func(c echo.Context) string {
-		return c.Request().Header.Get(header)
-	}
-}
+// func ticketFromHeader(header string) TicketGetter {
+// 	return func(c echo.Context) string {
+// 		return c.Request().Header.Get(header)
+// 	}
+// }
 
 func isConsumeJSON(c echo.Context) bool {
 	accept := c.Request().Header.Get("Accept")
@@ -848,4 +622,159 @@ func readFileWithDefault(root string, files []string, defaultValue string) strin
 		}
 	}
 	return defaultValue
+}
+
+// CreateServer 创建一个 sso 服务
+func CreateServer(config *Config, sessionMgr SessionManager, online users.Sessions) (*Server, error) {
+	if strings.HasSuffix(config.URLPrefix, "/") {
+		config.URLPrefix = strings.TrimSuffix(config.URLPrefix, "/")
+	}
+	if config.SessionPath == "" {
+		config.SessionPath = "/"
+	} else if !strings.HasPrefix(config.SessionPath, "/") {
+		config.SessionPath = "/" + config.SessionPath
+	}
+
+	templateBox, err := rice.FindBox("static")
+	if err != nil {
+		return nil, errors.New("load static directory fail, " + err.Error())
+	}
+
+	// tokenName := "token"
+	// ticketGetter := ticketFromQueryAndCookie(tokenName)
+	// if config.TicketLookup != "" {
+	// 	parts := strings.Split(config.TicketLookup, ":")
+	// 	if len(parts) != 2 {
+	// 		return nil, errors.New("TicketLookup(" + config.TicketLookup + ") is invalid")
+	// 	}
+
+	// 	tokenName = parts[1]
+	// 	switch parts[0] {
+	// 	case "query":
+	// 		ticketGetter = ticketFromQuery(parts[1])
+	// 	case "cookie":
+	// 		ticketGetter = ticketFromCookie(parts[1])
+	// 	case "header":
+	// 		ticketGetter = ticketFromHeader(parts[1])
+	// 	case "query_and_cookie":
+	// 		ticketGetter = ticketFromQueryAndCookie(parts[1])
+	// 	}
+	// }
+
+	logger := log.New(os.Stderr, "[sso] ", log.LstdFlags|log.Lshortfile)
+
+	// UserConfig     interface{}
+	// AuthConfig     interface{}
+
+	//	userManager, online, err := DefaultUserHandler(config, logger)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+
+	// factory := TicketHandlerFactories[config.TicketProtocol]
+	// if factory == nil {
+	// 	return nil, errors.New("protocl '" + config.TicketProtocol + "' is unsupported.")
+	// }
+	// ticketHandler, err := factory(config.TicketConfig)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	variables := map[string]interface{}{}
+	variables["url_prefix"] = config.URLPrefix
+	variables["play_path"] = config.PlayPath
+	variables["application_context"] = config.URLPrefix
+
+	variables["client_title_text"] = config.ClientTitleText
+	variables["header_title_text"] = config.HeaderTitleText
+	variables["footer_title_text"] = config.FooterTitleText
+	variables["logo_png"] = config.LogoPath
+	variables["new_user_url"] = config.NewUserURL
+
+	// Echo instance
+	e := echo.New()
+	e.Use(middleware.Logger())
+	e.Use(middleware.Recover())
+	e.Use(middleware.MethodOverrideWithConfig(middleware.MethodOverrideConfig{
+		Getter: func(c echo.Context) string {
+			m := c.FormValue("_method")
+			if m != "" {
+				return m
+			}
+			return c.QueryParam("_method")
+		}}))
+	srv := &Server{
+		config:     *config,
+		engine:     e,
+		sessionMgr: sessionMgr,
+		logger:     logger,
+		redirect: func(c echo.Context, toURL string) error {
+			return c.Redirect(http.StatusTemporaryRedirect, toURL)
+		},
+		captcha: config.Captcha,
+		data:    variables,
+	}
+
+	if config.RedirectMode == "html" {
+		srv.redirect = func(c echo.Context, toURL string) error {
+			data := map[string]interface{}{
+				"global":    srv.data,
+				"returnURL": toURL,
+			}
+			return c.Render(http.StatusOK, "success.html", data)
+		}
+	}
+
+	if len(config.TampletePaths) == 0 {
+		config.TampletePaths = append(config.TampletePaths, filepath.Join("lib/web/sso"))
+	}
+	srv.engine.Renderer = &renderer{
+		srv:           srv,
+		templates:     map[string]*template.Template{},
+		templateRoots: config.TampletePaths,
+		templateBox:   templateBox,
+	}
+
+	fs := http.FileServer(templateBox.HTTPBox())
+	assetHandler := http.StripPrefix(config.URLPrefix+"/static/",
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upath := r.URL.Path
+			if strings.HasPrefix(upath, "/") {
+				upath = strings.TrimPrefix(upath, "/")
+			}
+			for _, root := range config.TampletePaths {
+				filename := filepath.Join(root, "static", upath)
+				if _, err := os.Stat(filename); err == nil {
+					http.ServeFile(w, r, filename)
+					return
+				}
+			}
+
+			fs.ServeHTTP(w, r)
+		}))
+
+	srv.sessonHashFunc = sha1.New
+	switch srv.config.SessionHashFunc {
+	case "", "sha1":
+	case "md5", "MD5":
+		srv.sessonHashFunc = md5.New
+	}
+
+	srv.engine.GET(config.URLPrefix+"/debug/*", echo.WrapHandler(http.StripPrefix(config.URLPrefix, http.DefaultServeMux)))
+	srv.engine.GET(config.URLPrefix+"/static/*", echo.WrapHandler(assetHandler))
+	srv.engine.GET(config.URLPrefix+"/login", srv.loginGet)
+	srv.engine.POST(config.URLPrefix+"/login", srv.login)
+	srv.engine.POST(config.URLPrefix+"/logout", srv.logout)
+	srv.engine.GET(config.URLPrefix+"/logout", srv.logout)
+	//srv.engine.GET("/auth", srv.getTicket)
+	//srv.engine.GET(config.URLPrefix+"/verify", srv.verifyTicket)
+	//srv.engine.POST("/verify", srv.verifyTickets)
+
+	// srv.engine.GET(config.URLPrefix+"/locked_users", srv.lockedUsers)
+	// srv.engine.GET(config.URLPrefix+"/unlock_user", srv.userUnlock)
+
+	srv.engine.GET(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(users.GenerateCaptcha(config.Captcha))))
+	// srv.engine.PUT(config.URLPrefix+"/captcha", echo.WrapHandler(http.HandlerFunc(captchaVerify(config.Captcha.Digit))))
+
+	return srv, nil
 }

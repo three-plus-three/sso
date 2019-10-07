@@ -281,7 +281,17 @@ func (ow *onlineWrapper) FailCount(username string) int {
 }
 
 func (ow *onlineWrapper) Auth(ctx context.Context, auth Authentication, loginInfo *LoginInfo) (*UserInfo, error) {
-	return ow.inner.Auth(ctx, auth, loginInfo)
+	userinfo, err := ow.inner.Auth(ctx, auth, loginInfo)
+	if err != nil {
+		return userinfo, err
+	}
+
+	sessonID, err := ow.online.Login(userinfo.ID, loginInfo.Address, loginInfo.Service)
+	if err != nil {
+		return userinfo, err
+	}
+	userinfo.SessonID = sessonID
+	return userinfo, err
 }
 
 func OnlineWrap(um UserManager, online Sessions, loginConflict string, logger log.Logger) (UserManager, error) {

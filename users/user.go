@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/three-plus-three/modules/netutil"
@@ -23,6 +24,7 @@ type LoginInfo struct {
 }
 
 func (u *LoginInfo) IsForce() bool {
+	u.ForceLogin = strings.ToLower(u.ForceLogin)
 	return u.ForceLogin == "on" ||
 		u.ForceLogin == "true" ||
 		u.ForceLogin == "checked"
@@ -30,9 +32,10 @@ func (u *LoginInfo) IsForce() bool {
 
 type UserInfo struct {
 	LoginInfo
-	IsNew bool
-	ID    interface{}
-	Data  map[string]interface{}
+	IsNew    bool
+	ID       interface{}
+	SessonID string
+	Data     map[string]interface{}
 }
 
 func (u *UserInfo) RawName() string {
@@ -51,6 +54,30 @@ func (u *UserInfo) RawName() string {
 		}
 	}
 	return ""
+}
+
+func (u *UserInfo) Roles() []string {
+	if !u.IsNew {
+		return nil
+	}
+	if u.Data == nil {
+		return nil
+	}
+	o := u.Data["roles"]
+	if o == nil {
+		return nil
+	}
+	switch vv := o.(type) {
+	case []string:
+		return vv
+	case []interface{}:
+		ss := make([]string, 0, len(vv))
+		for _, v := range vv {
+			ss = append(ss, fmt.Sprint(v))
+		}
+		return ss
+	}
+	return nil
 }
 
 type Authentication interface {
