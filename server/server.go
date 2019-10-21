@@ -684,7 +684,7 @@ func (srv *Server) logout(c echo.Context) error {
 		ticket, err = srv.tickets.RemoveTicket(ticketString)
 		if err != nil {
 			srv.logger.Println("删除 ticket 失败 -", err)
-			return echo.NewHTTPError(http.StatusUnauthorized, "删除 ticket 失败 - "+err.Error())
+			// return echo.NewHTTPError(http.StatusUnauthorized, "删除 ticket 失败 - "+err.Error())
 		}
 
 	} else {
