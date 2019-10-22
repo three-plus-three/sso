@@ -1,6 +1,9 @@
 package users
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 type AuthResult struct {
 	IsNewUser bool
@@ -30,6 +33,7 @@ type AuthContext struct {
 }
 
 func (u *AuthContext) IsForce() bool {
+	u.ForceLogin = strings.ToLower(u.ForceLogin)
 	return u.ForceLogin == "on" ||
 		u.ForceLogin == "true" ||
 		u.ForceLogin == "checked"
