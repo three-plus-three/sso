@@ -15,6 +15,9 @@ import (
 
 var ErrCookieNotFound = errors.New("session cookie isn't found")
 var ErrCookieEmpty = errors.New("session cookie is empty")
+var ErrSessionExpiredOrMissing = errors.New("session is expired or missing")
+var ErrSessionInvalid = errors.New("session is invalid")
+var ErrSessionUserMissing = errors.New("session user is missing")
 
 const (
 	// DefaultSessionKey default key value
