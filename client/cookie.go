@@ -140,11 +140,15 @@ func GetValuesFromString(value string, verify func(data, sig string) bool) (url.
 	}
 
 	if IsInvalid(values) {
-		return nil, errors.New("session is invalid")
+		return nil, ErrSessionInvalid
 	}
 
 	if TimeoutExpiredOrMissing(values) {
-		return nil, errors.New("session is timeout")
+		return nil, ErrSessionExpiredOrMissing
+	}
+
+	if user := values.Get(SESSION_USER_KEY); user == "" {
+		return nil, ErrSessionUserMissing
 	}
 	return values, nil
 }
