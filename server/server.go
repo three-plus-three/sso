@@ -88,7 +88,7 @@ type UserManager = users.UserManager
 // Config 服务的配置项
 type Config struct {
 	//数字验证码配置
-	Captcha         base64Captcha.ConfigDigit
+	Captcha         base64Captcha.DriverDigit
 	Theme           string
 	URLPrefix       string
 	PlayPath        string
@@ -295,7 +295,7 @@ type Server struct {
 	ticketGetter          TicketGetter
 	authenticatingTickets authenticatingTickets
 	logger                *log.Logger
-	captcha               interface{}
+	captcha               base64Captcha.DriverDigit
 	redirect              func(c echo.Context, url string) error
 	data                  map[string]interface{}
 
@@ -532,10 +532,14 @@ func (srv *Server) relogin(c echo.Context, loginInfo users.LoginInfo, message st
 	}
 
 	if count := srv.UserManager.FailCount(loginInfo.Username); count > 0 {
-		captchaID := "" // time.Now().Format(time.RFC3339Nano)
-		data["captcha_id"] = captchaID
-		captchaKey, captchaCode := base64Captcha.GenerateCaptcha(captchaID, srv.captcha)
-		data["captcha_data"] = base64Captcha.CaptchaWriteToBase64Encoding(captchaCode)
+
+		c := base64Captcha.NewCaptcha(&srv.captcha, base64Captcha.DefaultMemStore)
+		captchaKey, base64String, err := c.Generate()
+		if err != nil {
+			data["errorMessage"] = err.Error()
+		}
+
+		data["captcha_data"] = base64String
 		data["captcha_key"] = captchaKey
 	}
 

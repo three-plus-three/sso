@@ -12,28 +12,32 @@ import (
 
 //ConfigJsonBody json request body.
 type ConfigJsonBody struct {
-	Id              string
-	CaptchaType     string
-	VerifyValue     string
-	ConfigAudio     base64Captcha.ConfigAudio
-	ConfigCharacter base64Captcha.ConfigCharacter
-	ConfigDigit     base64Captcha.ConfigDigit
+	Id          string
+	CaptchaType string
+	VerifyValue string
+	ConfigDigit base64Captcha.DriverDigit
 }
 
 // base64Captcha create http handler
-func GenerateCaptcha(config base64Captcha.ConfigDigit) func(w http.ResponseWriter, r *http.Request) {
+func GenerateCaptcha(config base64Captcha.DriverDigit) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		id := query.Get("captcha_id")
+		// query := r.URL.Query()
 
-		//GenerateCaptcha 第一个参数为空字符串,包会自动在服务器一个随机种子给你产生随机uiid.
-		captchaKey, captchaCode := base64Captcha.GenerateCaptcha(id, config)
-		base64String := base64Captcha.CaptchaWriteToBase64Encoding(captchaCode)
+		c := base64Captcha.NewCaptcha(&config, base64Captcha.DefaultMemStore)
+		captchaKey, captchaCode, err := c.Generate()
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"msg":     err.Error(),
+			})
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":     true,
-			"data":        base64String,
+			"data":        captchaCode,
 			"captcha_key": captchaKey,
 			"msg":         "success",
 		})
@@ -44,7 +48,7 @@ var failResponse = map[string]interface{}{"success": false, "data": "验证失�
 var okResponse = map[string]interface{}{"success": true, "data": "验证通过", "msg": "captcha verified"}
 
 // base64Captcha verify http handler
-func CaptchaVerify(config base64Captcha.ConfigDigit) func(w http.ResponseWriter, r *http.Request) (bool, error) {
+func CaptchaVerify(config base64Captcha.DriverDigit) func(w http.ResponseWriter, r *http.Request) (bool, error) {
 	return func(w http.ResponseWriter, r *http.Request) (bool, error) {
 
 		var captchaKey, verifyValue string
@@ -90,7 +94,7 @@ func CaptchaVerify(config base64Captcha.ConfigDigit) func(w http.ResponseWriter,
 		}
 
 		//比较图像验证码
-		return base64Captcha.VerifyCaptcha(captchaKey, verifyValue), nil
+		return base64Captcha.DefaultMemStore.Verify(captchaKey, verifyValue, true), nil
 	}
 }
 
@@ -108,7 +112,11 @@ func (ow *captchaWrapper) Read(loginInfo *LoginInfo) (Authentication, error) {
 			}
 
 			//比较图像验证码
-			if !base64Captcha.VerifyCaptcha(loginInfo.CaptchaKey, loginInfo.CaptchaValue) {
+
+			//比较图像验证码
+			if !base64Captcha.DefaultMemStore.Verify(loginInfo.CaptchaKey, loginInfo.CaptchaValue, true) {
+
+				// if !base64Captcha.VerifyCaptcha(loginInfo.CaptchaKey, loginInfo.CaptchaValue) {
 				return nil, ErrCaptchaKey
 			}
 		}
